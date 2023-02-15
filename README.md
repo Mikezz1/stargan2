@@ -1,0 +1,1 @@
+# Implementation of StarGan2 paper
