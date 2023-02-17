@@ -1,3 +1,8 @@
+from tqdm import tqdm
+import torch
+import torch.nn as nn
+
+
 class Trainer:
     def __init__(
         self,
@@ -19,6 +24,17 @@ class Trainer:
         self.config = config
         self.device = device
         self.logger = logger
+        self.generator = generator
+        self.discriminator = discriminator
+        self.mapping_network = mapping_network
+        self.style_encoder = style_encoder
+        self.dataloader = dataloader
+        self.optimizer_g = optimizer_g
+        self.optimizer_d = optimizer_d
+        self.optimizer_s = optimizer_s
+        self.optimizer_m = optimizer_m
+        self.scheduler_g = scheduler_g
+        self.scheduler_d = scheduler_d
 
     def train(self):
 
@@ -34,10 +50,15 @@ class Trainer:
                 self.mapping_network.train()
                 self.style_encoder.train()
 
+                self.optimizer_g.zero_grad()
+                self.optimizer_d.zero_grad()
+                self.optimizer_s.zero_grad()
+                self.optimizer_m.zero_grad()
+
                 z = torch.randn(16)
                 z2 = torch.randn(16)
                 s = self.mapping_network(z)  # shape of (B, num_domains, 16)
-                s2 = self.mapping_network(z)  # shape of (B, num_domains, 16)
+                s2 = self.mapping_network(z2)  # shape of (B, num_domains, 16)
                 real = batch["image"]
                 fake = self.generator(real, s)
                 fake2 = self.generator(real, s2)
@@ -57,40 +78,48 @@ class Trainer:
                 loss_g = -adv_l - style_rec_l + style_div_l - cycle_l
                 loss_d = adv_l
 
-                if step % self.config["training"]["log_steps"] == 0:
-                    grad_norm_g = ...
-                    grad_norm_d = ...
-                    grad_norm_m = ...
-                    grad_norm_s = ...
+                loss_g.backward()
+                loss_d.backward()
 
-                    self.log_everything()
+                self.optimizer_g.step()
+                self.optimizer_d.step()
+                self.optimizer_s.step()
+                self.optimizer_m.step()
 
-                    self.inference()
+                # if step % self.config["training"]["log_steps"] == 0:
+                #     grad_norm_g = ...
+                #     grad_norm_d = ...
+                #     grad_norm_m = ...
+                #     grad_norm_s = ...
 
-                if step % self.config["training"]["save_steps"] == 0:
-                    save_checkpoint(...)
+                #     self.log_everything()
 
-    def log_everything(
-        self,
-        step,
-        epoch,
-    ):
-        self.logger.add_scalar("step", step)
-        self.logger.add_scalar("epoch", epoch)
+                #     self.inference()
 
-    @torch.no_grad()
-    def get_grad_norm(self, model, norm_type=2):
-        """
-        Move to utils
-        """
-        parameters = model.parameters()
-        if isinstance(parameters, torch.Tensor):
-            parameters = [parameters]
-        parameters = [p for p in parameters if p.grad is not None]
-        total_norm = torch.norm(
-            torch.stack(
-                [torch.norm(p.grad.detach(), norm_type).cpu() for p in parameters]
-            ),
-            norm_type,
-        )
-        return total_norm.item()
+                # if step % self.config["training"]["save_steps"] == 0:
+                #     save_checkpoint(...)
+
+    # def log_everything(
+    #     self,
+    #     step,
+    #     epoch,
+    # ):
+    #     self.logger.add_scalar("step", step)
+    #     self.logger.add_scalar("epoch", epoch)
+
+    # @torch.no_grad()
+    # def get_grad_norm(self, model, norm_type=2):
+    #     """
+    #     Move to utils
+    #     """
+    #     parameters = model.parameters()
+    #     if isinstance(parameters, torch.Tensor):
+    #         parameters = [parameters]
+    #     parameters = [p for p in parameters if p.grad is not None]
+    #     total_norm = torch.norm(
+    #         torch.stack(
+    #             [torch.norm(p.grad.detach(), norm_type).cpu() for p in parameters]
+    #         ),
+    #         norm_type,
+    #     )
+    #     return total_norm.item()

@@ -3,53 +3,83 @@ import torch
 import torch.nn.functional as F
 
 
+class DummyResampler(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x
+
+
 class Generator(nn.Module):
     def __init__(self):
+        super().__init__()
         self.in_conv = nn.Conv2d(
             in_channels=3, out_channels=64, kernel_size=3, padding=1
         )
-        self.out_conv = nn.Conv2d()
+        self.out_conv = nn.Conv2d(64, 3, 1, padding=0)
         self.downsampling = nn.Sequential(
-            ResBlock(64, 128, nn.InstanceNorm2d()),
+            # 64x64
+            ResBlock(64, 128, nn.InstanceNorm2d(64)),
             nn.AvgPool2d(2),
-            ResBlock(128, 256, nn.InstanceNorm2d()),
+            # 32x32
+            ResBlock(128, 256, nn.InstanceNorm2d(128)),
             nn.AvgPool2d(2),
-            ResBlock(256, 512, nn.InstanceNorm2d()),
+            # 16x16
+            ResBlock(256, 512, nn.InstanceNorm2d(256)),
             nn.AvgPool2d(2),
-            ResBlock(512, 512, nn.InstanceNorm2d()),
+            # 8x8
+            ResBlock(512, 512, nn.InstanceNorm2d(512)),
             nn.AvgPool2d(2),
-            ResBlock(512, 512, nn.InstanceNorm2d()),
+            # 4x4
+            ResBlock(512, 512, nn.InstanceNorm2d(512)),
         )
-        self.intermediate = nn.Sequential(
-            ResBlock(512, 512, nn.InstanceNorm2d()),
-            ResBlock(512, 512, nn.InstanceNorm2d()),
-            AdaINResBlock(512, 512),
-            AdaINResBlock(512, 512),
+        self.intermediate1 = nn.Sequential(
+            ResBlock(512, 512, nn.InstanceNorm2d(512)),
+            ResBlock(512, 512, nn.InstanceNorm2d(512)),
         )
 
-        self.upsample = nn.Sequential(
-            nn.Upsample(scale_factor=2),
-            AdaINResBlock(512, 256),
-            nn.Upsample(scale_factor=2),
-            AdaINResBlock(256, 128),
-            nn.Upsample(scale_factor=2),
-            AdaINResBlock(128, 64),
-            nn.Upsample(scale_factor=2),
-            AdaINResBlock(64, 3),
+        self.intermediate2 = nn.ModuleList(
+            [
+                AdaINResBlock(512, 512),
+                AdaINResBlock(512, 512),
+            ]
+        )
+
+        self.upsampling = nn.ModuleList(
+            [
+                # 4x4
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(512, 256),
+                # 8x8
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(256, 128),
+                # 16x16
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(128, 64),
+                # 32x32
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(64, 64),
+                # 64x64
+            ]
         )
 
     def forward(self, x, s):
         x = self.in_conv(x)
-        x = self.upsampling(self.intermediate(self.downsampling(x)), s)
+        x = self.downsampling(x)
+        x = self.intermediate1(x)
+        for layer in self.intermediate2:
+            x = layer(x, s)
+        for layer in self.upsampling:
+            x = layer(x, s) if isinstance(layer, AdaINResBlock) else layer(x)
         return self.out_conv(x)
 
 
 class Discriminator(nn.Module):
-    def __init__(self, D):
-        self.in_conv = nn.Conv2d(3, 3, padding=1)
+    def __init__(self, K):
+        super().__init__()
+        self.in_conv = nn.Conv2d(3, 64, 3, padding=1)
         self.downsampling = nn.Sequential(
-            ResBlock(3, 64),
-            nn.AvgPool2d(2),
             ResBlock(64, 128),
             nn.AvgPool2d(2),
             ResBlock(128, 256),
@@ -64,16 +94,18 @@ class Discriminator(nn.Module):
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(512, 512, 3, padding=1),
+            nn.Conv2d(512, 512, 2, padding=0),
             nn.LeakyReLU(),
         )
-        self.out = nn.Linear(512, D * 1)
+        self.out = nn.ModuleList([nn.Linear(512, 1) for _ in range(K)])
 
-    def forward(self, x):
+    def forward(self, x, y):
         x = self.in_conv(x)
         x = self.downsampling(x)
         x = self.conv(x)
-        return self.out(x)
+        x = x.squeeze(3).squeeze(2)
+        output = self.out[y](x)
+        return output
 
 
 class MappingNetwork(nn.Module):
@@ -83,9 +115,13 @@ class MappingNetwork(nn.Module):
     adversarial objective and style diversificaton loss
     """
 
-    def __init__(self, K):
+    def __init__(self, K, D):
+        super().__init__()
         self.backbone = nn.Sequential(
-            *list(self.get_fc_block(512, 512) for i in range(4))
+            self.get_fc_block(16, 512),
+            self.get_fc_block(512, 512),
+            self.get_fc_block(512, 512),
+            self.get_fc_block(512, 512),
         )
         self.heads = nn.ModuleList(
             [
@@ -93,19 +129,17 @@ class MappingNetwork(nn.Module):
                     self.get_fc_block(512, 512),
                     self.get_fc_block(512, 512),
                     self.get_fc_block(512, 512),
-                    self.get_fc_block(512, 64, activation=False),
+                    self.get_fc_block(512, D, activation=False),
                 )
                 for j in range(K)
             ]
         )
 
-    def forward(self, z):
+    def forward(self, z, y):
         z = self.backbone(z)
-        outputs = []
-        for head in self.heads:
-            outputs.append(head(z))
-
-        return outputs
+        # select y's head corresponding to
+        output = self.heads[y](z)
+        return output
 
     def get_fc_block(self, in_ch, out_ch, activation=True):
         return (
@@ -121,11 +155,10 @@ class StyleEncoder(nn.Module):
     given generated image.
     """
 
-    def __init__(self, D):
-        self.in_conv = nn.Conv2d(3, 3, padding=1)
+    def __init__(self, D, K):
+        super().__init__()
+        self.in_conv = nn.Conv2d(3, 64, 3, padding=1)
         self.downsampling = nn.Sequential(
-            ResBlock(3, 64),
-            nn.AvgPool2d(2),
             ResBlock(64, 128),
             nn.AvgPool2d(2),
             ResBlock(128, 256),
@@ -140,16 +173,18 @@ class StyleEncoder(nn.Module):
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(512, 512, 3, padding=1),
+            nn.Conv2d(512, 512, 2, padding=0),
             nn.LeakyReLU(),
         )
-        self.out = nn.Linear(512, D * 64)
+        self.out = nn.ModuleList([nn.Linear(512, D) for _ in range(K)])
 
-    def forward(self, x):
+    def forward(self, x, y):
         x = self.in_conv(x)
         x = self.downsampling(x)
         x = self.conv(x)
-        return self.out(x)
+        x = x.squeeze(3).squeeze(2)
+        output = self.out[y](x)
+        return output
 
 
 class ResBlock(nn.Module):
@@ -169,17 +204,14 @@ class ResBlock(nn.Module):
         in_channels,
         out_channels,
         norm=DummyResampler(),
-        act=nn.Relu(),
-        # upsampling=DummyResampler(),
-        # pooling=DummyResampler(),
+        act=nn.ReLU(),
     ):
+        super().__init__()
         self.norm = norm
-        # self.upsampling = upsampling
-        # self.pooling = pooling
         self.act = act
         self.in_channels = in_channels
         self.out_channels = out_channels
-        if self.out_channels < self.in_channels:
+        if self.out_channels != self.in_channels:
             self.proj_conv = nn.Conv2d(
                 in_channels, out_channels, 1, padding=0, bias=False
             )
@@ -187,22 +219,18 @@ class ResBlock(nn.Module):
         self.layers = nn.Sequential(
             self.norm,
             self.act,
-            # self.upsampling,
             nn.Conv2d(in_channels, in_channels, 3, padding=1, bias=False),
-            # self.pooling,
             self.norm,
             self.act,
             nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
         )
 
-    def forward(self, x):
+    def forward(self, x, s=None):
         return self.shortcut(x) + self.layers(x)
 
     def shortcut(self, x):
-        if self.out_channels > self.in_channels:
+        if self.out_channels != self.in_channels:
             return self.proj_conv(x)
-        if self.out_channels > self.in_channels:
-            return F.upsample(x, scale_factor=2, mode="bilinear")
         return x
 
 
@@ -216,27 +244,26 @@ class AdaINResBlock(nn.Module):
         pre_resampler (nn.Module): ConvTranspoce or Upsample for upsampling blocks
     """
 
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-        act=nn.Relu(),
-        upsampling=DummyResampler(),
-    ):
-        # self.upsampling = upsampling
-        # self.pooling = pooling
+    def __init__(self, in_channels, out_channels, act=nn.ReLU()):
+        super().__init__()
         self.act = act
         self.style_dim = 64
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        if self.out_channels != self.in_channels:
+            self.proj_conv = nn.Conv2d(
+                in_channels, out_channels, 1, padding=0, bias=False
+            )
 
-        self.layers = nn.Sequential(
-            AdaIN(in_channels, self.style_dim),
-            self.act,
-            # self.upsampling,
-            nn.Conv2d(in_channels, in_channels, 3, padding=1, bias=False),
-            # self.pooling,
-            AdaIN(in_channels, self.style_dim),
-            self.act,
-            nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+        self.layers = nn.ModuleList(
+            [
+                AdaIN(in_channels, self.style_dim),
+                self.act,
+                nn.Conv2d(in_channels, in_channels, 3, padding=1, bias=False),
+                AdaIN(in_channels, self.style_dim),
+                self.act,
+                nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+            ]
         )
 
     def forward(self, x, s):
@@ -246,10 +273,8 @@ class AdaINResBlock(nn.Module):
         return self.shortcut(resid) + x
 
     def shortcut(self, x):
-        if self.out_channels > self.in_channels:
+        if self.out_channels != self.in_channels:
             return self.proj_conv(x)
-        if self.out_channels > self.in_channels:
-            return F.upsample(x, scale_factor=2, mode="bilinear")
         return x
 
 
@@ -257,6 +282,7 @@ class AdaIN(nn.Module):
     """Like in style gan"""
 
     def __init__(self, n_fmaps, style_dim):
+        super().__init__()
         self.mu_projector = nn.Linear(style_dim, n_fmaps)
         self.sigma_projector = nn.Linear(style_dim, n_fmaps)
 
@@ -272,14 +298,6 @@ class AdaIN(nn.Module):
         return x * sigma_projector + mu_style
 
 
-class DummyResampler(nn.Module):
-    def __init__(self):
-        pass
-
-    def forward(self, x):
-        return x
-
-
 def adversarial_loss(d_real, d_fake):
     """
 
@@ -290,7 +308,9 @@ def adversarial_loss(d_real, d_fake):
     Returns:
         torch.Tensor: adversarial loss
     """
-    return torch.mean(torch.log(d_real) + torch.log(1 - d_fake))
+    return torch.mean(
+        torch.log(torch.sigmoid(d_real)) + torch.log(1 - torch.sigmoid(d_fake))
+    )
 
 
 def style_rec_loss(s, s_rec):
