@@ -108,11 +108,6 @@ class Trainer:
                 self.optimizer_s.step()
                 self.optimizer_m.step()
 
-                print(loss_d.item(), loss_g.item())
-
-                if step > 20:
-                    break
-
                 if (self.log) and (step % self.cfg["training"]["log_steps"] == 0):
                     gnorm_g = self.get_grad_norm(self.model["gen"])
                     gnorm_d = self.get_grad_norm(self.model["disc"])
