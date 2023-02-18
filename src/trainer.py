@@ -1,96 +1,117 @@
 from tqdm import tqdm
 import torch
 import torch.nn as nn
+from src.model import *
+from torch.optim import AdamW
+from src.logger import WanDBWriter
 
 
 class Trainer:
-    def __init__(
-        self,
-        generator,
-        discriminator,
-        mapping_network,
-        style_encoder,
-        dataloader,
-        optimizer_g,
-        optimizer_d,
-        optimizer_s,
-        optimizer_m,
-        scheduler_g,
-        scheduler_d,
-        config,
-        device,
-        logger,
-    ):
-        self.config = config
+    def __init__(self, K, D, BS, EPOCHS, dataloader, device, lr=5e-5):
+        # self.config = config
         self.device = device
-        self.logger = logger
-        self.generator = generator
-        self.discriminator = discriminator
-        self.mapping_network = mapping_network
-        self.style_encoder = style_encoder
+        self.model = dict()
+        self.model["gen"] = Generator()
+        self.model["disc"] = Discriminator(K=K)
+        self.model["map"] = MappingNetwork(K=K, D=D)
+        self.model["se"] = StyleEncoder(K=K, D=D)
+
+        self.BS = BS
+        self.K = K
+        self.D = D
+        self.EPOCHS = EPOCHS
+        self.log = False
+
         self.dataloader = dataloader
-        self.optimizer_g = optimizer_g
-        self.optimizer_d = optimizer_d
-        self.optimizer_s = optimizer_s
-        self.optimizer_m = optimizer_m
-        self.scheduler_g = scheduler_g
-        self.scheduler_d = scheduler_d
+        self.optimizer_g = AdamW(self.model["gen"].parameters(), lr=lr)
+        self.optimizer_d = AdamW(self.model["disc"].parameters(), lr=lr)
+        self.optimizer_s = AdamW(self.model["se"].parameters(), lr=lr)
+        self.optimizer_m = AdamW(self.model["map"].parameters(), lr=lr)
+
+        if self.log:
+            config == {"wandb_project": "stargan2"}
+            self.logger = WanDBWriter(config)
+
+        scheduler_g = None
+        scheduler_d = None
 
     def train(self):
 
         step = 0
 
-        for epoch in range(self.config["training"]["epochs"]):
+        for epoch in range(self.EPOCHS):
             for batch in tqdm(self.dataloader):
                 step += 1
-                self.logger.set_step(step)
 
-                self.generator.train()
-                self.discriminator.trian()
-                self.mapping_network.train()
-                self.style_encoder.train()
+                self.logger.set_step(step) if self.log else None
+
+                for block in self.model.values():
+                    block.train()
 
                 self.optimizer_g.zero_grad()
                 self.optimizer_d.zero_grad()
                 self.optimizer_s.zero_grad()
                 self.optimizer_m.zero_grad()
 
-                z = torch.randn(16)
-                z2 = torch.randn(16)
-                s = self.mapping_network(z)  # shape of (B, num_domains, 16)
-                s2 = self.mapping_network(z2)  # shape of (B, num_domains, 16)
-                real = batch["image"]
-                fake = self.generator(real, s)
-                fake2 = self.generator(real, s2)
+                z = torch.randn((self.BS, 16))
+                z2 = torch.randn((self.BS, 16))
+                y_trg = torch.randint(size=(1, 1), low=0, high=self.K - 1).item()
+                s = self.model["map"](z, y_trg)  # shape of (B, num_domains, 16)
+                s2 = self.model["map"](z2, y_trg)  # shape of (B, num_domains, 16)
 
-                s_fake = self.style_encoder(fake)
+                real = batch[0]
 
-                fake_reversed = self.generator(fake, self.style_encoder(real))
+                fake = self.model["gen"](real, s)
+                fake2 = self.model["gen"](real, s2)
+                s_fake = self.model["se"](fake, y_trg)
 
-                d_real = self.discriminator(real)
-                d_fake = self.discriminator(fake)
+                fake_reversed = self.model["gen"](fake, self.model["se"](real, y_trg))
 
-                adv_l = adversarial_loss(d_real, d_fake)
+                d_real = self.model["disc"](real, y_trg)
+                d_fake_d = self.model["disc"](fake.detach(), y_trg)
+                d_fake_g = self.model["disc"](fake, y_trg)
+
+                adv_fake_d = adversarial_loss(d_fake_d, 1)
+                adv_fake_g = adversarial_loss(d_fake_g, 0)
+                adv_real_d = adversarial_loss(d_real, 0)
+
                 style_rec_l = style_rec_loss(s, s_fake)
                 style_div_l = style_div_loss(fake, fake2)
                 cycle_l = cycle_loss(fake, fake_reversed)
 
-                loss_g = -adv_l - style_rec_l + style_div_l - cycle_l
-                loss_d = adv_l
+                loss_g = adv_fake_g + style_rec_l - style_div_l + cycle_l
+                loss_d = adv_real_d + adv_fake_d
 
-                loss_g.backward()
                 loss_d.backward()
+                loss_g.backward()
 
                 self.optimizer_g.step()
                 self.optimizer_d.step()
                 self.optimizer_s.step()
                 self.optimizer_m.step()
 
-                # if step % self.config["training"]["log_steps"] == 0:
-                #     grad_norm_g = ...
-                #     grad_norm_d = ...
-                #     grad_norm_m = ...
-                #     grad_norm_s = ...
+                print(loss_d.item(), loss_g.item())
+
+                if step > 20:
+                    break
+
+                if (self.log) and (step % self.config["log_steps"] == 0):
+                    gnorm_g = self.get_grad_norm(self.model["gen"])
+                    gnorm_d = self.get_grad_norm(self.model["disc"])
+                    gnorm_m = self.get_grad_norm(self.model["map"])
+                    gnorm_s = self.get_grad_norm(self.model["se"])
+                    gnorms = [gnorm_g, gnorm_d, gnorm_m, gnorm_s]
+
+                    self.log_scalars(
+                        step,
+                        epoch,
+                        loss_g.item(),
+                        loss_d.item(),
+                        cycle_l.item(),
+                        style_div_l.item(),
+                        style_rec_l.item(),
+                        gnorms,
+                    )
 
                 #     self.log_everything()
 
@@ -99,27 +120,37 @@ class Trainer:
                 # if step % self.config["training"]["save_steps"] == 0:
                 #     save_checkpoint(...)
 
-    # def log_everything(
-    #     self,
-    #     step,
-    #     epoch,
-    # ):
-    #     self.logger.add_scalar("step", step)
-    #     self.logger.add_scalar("epoch", epoch)
+    def log_scalars(
+        self, step, epoch, loss_g, loss_d, cycle_l, style_div_l, style_rec_l, gnorms
+    ):
+        self.logger.add_scalar("step", step)
+        self.logger.add_scalar("epoch", epoch)
+        self.logger.add_scalar("loss_g", loss_g)
+        self.logger.add_scalar("loss_d", loss_d)
+        self.logger.add_scalar("loss_cycle", cycle_l)
+        self.logger.add_scalar("loss_style_div", style_div_l)
+        self.logger.add_scalar("loss_style_rex", style_rec_l)
+        for grad_norm, label in zip(gnorms, ["G_gn", "D_gn", "M_gn", "SE_gn"]):
+            self.logger.add_scalar(label, grad_norm)
 
-    # @torch.no_grad()
-    # def get_grad_norm(self, model, norm_type=2):
-    #     """
-    #     Move to utils
-    #     """
-    #     parameters = model.parameters()
-    #     if isinstance(parameters, torch.Tensor):
-    #         parameters = [parameters]
-    #     parameters = [p for p in parameters if p.grad is not None]
-    #     total_norm = torch.norm(
-    #         torch.stack(
-    #             [torch.norm(p.grad.detach(), norm_type).cpu() for p in parameters]
-    #         ),
-    #         norm_type,
-    #     )
-    #     return total_norm.item()
+    def log_images(
+        self,
+    ):
+        raise NotImplementedError
+
+    @torch.no_grad()
+    def get_grad_norm(self, model, norm_type=2):
+        """
+        Move to utils
+        """
+        parameters = model.parameters()
+        if isinstance(parameters, torch.Tensor):
+            parameters = [parameters]
+        parameters = [p for p in parameters if p.grad is not None]
+        total_norm = torch.norm(
+            torch.stack(
+                [torch.norm(p.grad.detach(), norm_type).cpu() for p in parameters]
+            ),
+            norm_type,
+        )
+        return total_norm.item()

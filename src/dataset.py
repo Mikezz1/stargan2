@@ -53,7 +53,7 @@ class CelebADataset(Dataset):
             for i, line in enumerate(f.readlines()):
                 line = re.sub(" *\n", "", line)
                 if i < 2:
-                    # first line - len of dataset, seconde - attributes header
+                    # first line - len of dataset, second - attributes header
                     continue
                 else:
                     values = re.split(" +", line)

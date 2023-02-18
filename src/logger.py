@@ -10,7 +10,7 @@ class WanDBWriter:
 
         wandb.login()
 
-        wandb.init(project=config["base"]["wandb_project"], config=config)
+        wandb.init(project=config["wandb_project"], config=config)
         self.wandb = wandb
 
         self.step = 0

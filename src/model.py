@@ -298,19 +298,18 @@ class AdaIN(nn.Module):
         return x * sigma_projector + mu_style
 
 
-def adversarial_loss(d_real, d_fake):
+def adversarial_loss(d_out: torch.Tensor, label: int):
     """
 
     Args:
-        d_real (torch.Tensor): output of disc on real image given real domain
-        d_fake (torch.Tensor): output of disc on fake image wihout implicit domain
+        d_out (torch.Tensor): output of disc on real image given real domain
+        label (int): output of disc on fake image wihout implicit domain
 
     Returns:
         torch.Tensor: adversarial loss
     """
-    return torch.mean(
-        torch.log(torch.sigmoid(d_real)) + torch.log(1 - torch.sigmoid(d_fake))
-    )
+    labels = torch.ones_like(d_out) if label == 1 else torch.zeros_like(d_out)
+    return F.binary_cross_entropy_with_logits(d_out, labels)
 
 
 def style_rec_loss(s, s_rec):
