@@ -16,7 +16,10 @@ CUR_DIR = os.path.dirname(os.path.abspath(__file__))
 ## Create a custom Dataset class
 class CelebADataset(Dataset):
     def __init__(
-        self, root_dir=os.path.join(CUR_DIR, "../../data/celeba"), transform=None
+        self,
+        root_dir=os.path.join(CUR_DIR, "../../data/celeba"),
+        transform=None,
+        domains=["Male"],
     ):
         """
         Args:
@@ -52,17 +55,41 @@ class CelebADataset(Dataset):
         with open(f"{root_dir}/list_attr_celeba.txt") as f:
             for i, line in enumerate(f.readlines()):
                 line = re.sub(" *\n", "", line)
-                if i < 2:
+                if i == 0:
                     # first line - len of dataset, second - attributes header
                     continue
+                if i == 1:
+                    domain_indices = []
+                    header = re.split(" +", line)
+                    for domain in domains:
+                        domain_indices.append(header.index(domain))
+
                 else:
                     values = re.split(" +", line)
                     filename = values[0]
                     self.filenames.append(filename)
                     # delete contraint on num of annotations
-                    self.annotations.append([int(v) for v in values[1:]])
+                    annotations = []
+                    for idx in domain_indices:
+                        annotations.append(int(values[idx]))
+                    annotations = self._transform_targets(tuple(annotations), domains)
+                    self.annotations.append(annotations)
 
         self.annotations = np.array(self.annotations)
+
+    def _transform_targets(self, seq, domains):
+        from itertools import product
+
+        """Transforms sequence of form (-1,1,-1) to the form of (1,0,0,1,1,0)"""
+        new_seq = []
+        combs = list(product([-1, 1], repeat=len(domains)))
+        labels = {d: i for i, d in enumerate(combs)}
+        return labels[seq]
+
+        # for elem in seq:
+
+        #     new_seq.extend([0, 1]) if elem == 1 else new_seq.extend([1, 0])
+        return new_seq
 
     def __len__(self):
         return len(self.filenames)

@@ -104,8 +104,9 @@ class Discriminator(nn.Module):
         x = self.downsampling(x)
         x = self.conv(x)
         x = x.squeeze(3).squeeze(2)
-        output = self.out[y](x)
-        return output
+        out = torch.stack([layer(x) for layer in self.out], dim=1)
+        out = out[range(x.size(0)), y]
+        return out
 
 
 class MappingNetwork(nn.Module):
@@ -138,8 +139,9 @@ class MappingNetwork(nn.Module):
     def forward(self, z, y):
         z = self.backbone(z)
         # select y's head corresponding to
-        output = self.heads[y](z)
-        return output
+        out = torch.stack([layer(z) for layer in self.heads], dim=1)
+        out = out[range(z.size(0)), y, :]
+        return out
 
     def get_fc_block(self, in_ch, out_ch, activation=True):
         return (
@@ -183,8 +185,9 @@ class StyleEncoder(nn.Module):
         x = self.downsampling(x)
         x = self.conv(x)
         x = x.squeeze(3).squeeze(2)
-        output = self.out[y](x)
-        return output
+        out = torch.stack([layer(x) for layer in self.out], dim=1)
+        out = out[range(x.size(0)), y, :]
+        return out
 
 
 class ResBlock(nn.Module):

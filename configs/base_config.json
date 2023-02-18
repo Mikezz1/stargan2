@@ -1,14 +1,19 @@
 {
     "wandb_project": "stargan2",
     "model": {
-        "D": 64,
-        "K": 40
+        "D": 64
     },
     "training": {
         "batch_size": 5,
         "epochs": 1,
         "device": "cpu",
-        "lr": 5e-5
+        "lr": 5e-5,
+        "log_steps": 20
     },
-    "data": {}
+    "data": {
+        "domains": [
+            "Male",
+            "Blond_Hair"
+        ]
+    }
 }

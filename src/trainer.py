@@ -12,14 +12,11 @@ class Trainer:
         self.cfg = config
         self.device = self.cfg["training"]["device"]
         self.model = dict()
+        self.K = 2 ** len(self.cfg["data"]["domains"])
         self.model["gen"] = Generator()
-        self.model["disc"] = Discriminator(K=self.cfg["model"]["K"])
-        self.model["map"] = MappingNetwork(
-            K=self.cfg["model"]["K"], D=self.cfg["model"]["D"]
-        )
-        self.model["se"] = StyleEncoder(
-            K=self.cfg["model"]["K"], D=self.cfg["model"]["D"]
-        )
+        self.model["disc"] = Discriminator(K=self.K)
+        self.model["map"] = MappingNetwork(K=self.K, D=self.cfg["model"]["D"])
+        self.model["se"] = StyleEncoder(K=self.K, D=self.cfg["model"]["D"])
 
         # self.BS = BS
         # self.K = K
@@ -55,6 +52,7 @@ class Trainer:
             for batch in tqdm(self.dataloader):
                 # batch.to(self.device)
                 real = batch[0].to(self.device)
+                y_src = batch[1]["attributes"]
 
                 step += 1
 
@@ -76,8 +74,8 @@ class Trainer:
                     self.device
                 )
                 y_trg = torch.randint(
-                    size=(1, 1), low=0, high=self.cfg["model"]["K"] - 1
-                ).item()
+                    size=(self.cfg["training"]["batch_size"], 1), low=0, high=self.K - 1
+                ).squeeze()
                 s = self.model["map"](z, y_trg)  # shape of (B, num_domains, 16)
                 s2 = self.model["map"](z2, y_trg)  # shape of (B, num_domains, 16)
 
@@ -85,9 +83,9 @@ class Trainer:
                 fake2 = self.model["gen"](real, s2)
                 s_fake = self.model["se"](fake, y_trg)
 
-                fake_reversed = self.model["gen"](fake, self.model["se"](real, y_trg))
+                fake_reversed = self.model["gen"](fake, self.model["se"](real, y_src))
 
-                d_real = self.model["disc"](real, y_trg)
+                d_real = self.model["disc"](real, y_src)
                 d_fake_d = self.model["disc"](fake.detach(), y_trg)
                 d_fake_g = self.model["disc"](fake, y_trg)
 
@@ -115,7 +113,7 @@ class Trainer:
                 if step > 20:
                     break
 
-                if (self.log) and (step % self.config["log_steps"] == 0):
+                if (self.log) and (step % self.cfg["training"]["log_steps"] == 0):
                     gnorm_g = self.get_grad_norm(self.model["gen"])
                     gnorm_d = self.get_grad_norm(self.model["disc"])
                     gnorm_m = self.get_grad_norm(self.model["map"])
@@ -132,6 +130,7 @@ class Trainer:
                         style_rec_l.item(),
                         gnorms,
                     )
+                    self.log_images(fake)
 
     def log_scalars(
         self, step, epoch, loss_g, loss_d, cycle_l, style_div_l, style_rec_l, gnorms
@@ -146,10 +145,8 @@ class Trainer:
         for grad_norm, label in zip(gnorms, ["G_gn", "D_gn", "M_gn", "SE_gn"]):
             self.logger.add_scalar(label, grad_norm)
 
-    def log_images(
-        self,
-    ):
-        raise NotImplementedError
+    def log_images(self, fake):
+        self.logger.add_image("fake", fake)
 
     @torch.no_grad()
     def get_grad_norm(self, model, norm_type=2):
