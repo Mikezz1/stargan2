@@ -5,12 +5,13 @@ import torch
 from src.model import *
 from src.trainer import Trainer
 import gc
+import json
 
+
+with open("configs/base_config.json") as f:
+    config = json.load(f)
 
 device = "cpu"
-BS = 2
-D = 64  # stylecode size
-K = 40  # number of domains
 
 transform = transforms.Compose(
     [
@@ -26,7 +27,7 @@ num_workers = 0 if device == "cuda" else 2
 pin_memory = True if device == "cuda" else False
 dataloader = torch.utils.data.DataLoader(
     dataset,
-    batch_size=BS,
+    batch_size=config["training"]["batch_size"],
     num_workers=num_workers,
     pin_memory=pin_memory,
     shuffle=True,
@@ -36,7 +37,7 @@ dataloader = torch.utils.data.DataLoader(
 # mapping_network = MappingNetwork(K=K, D=D)
 # style_encoder = StyleEncoder(K=K, D=D)
 
-trainer = Trainer(device="cpu", K=40, D=64, BS=2, EPOCHS=1, dataloader=dataloader)
+trainer = Trainer(config=config, dataloader=dataloader, log=False)
 
 
 if __name__ == "__main__":

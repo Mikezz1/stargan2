@@ -1,0 +1,14 @@
+{
+    "wandb_project": "stargan2",
+    "model": {
+        "D": 64,
+        "K": 40
+    },
+    "training": {
+        "batch_size": 5,
+        "epochs": 1,
+        "device": "cpu",
+        "lr": 5e-5
+    },
+    "data": {}
+}

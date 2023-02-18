@@ -7,30 +7,42 @@ from src.logger import WanDBWriter
 
 
 class Trainer:
-    def __init__(self, K, D, BS, EPOCHS, dataloader, device, lr=5e-5):
+    def __init__(self, dataloader, config, log):
         # self.config = config
-        self.device = device
+        self.cfg = config
+        self.device = self.cfg["training"]["device"]
         self.model = dict()
         self.model["gen"] = Generator()
-        self.model["disc"] = Discriminator(K=K)
-        self.model["map"] = MappingNetwork(K=K, D=D)
-        self.model["se"] = StyleEncoder(K=K, D=D)
+        self.model["disc"] = Discriminator(K=self.cfg["model"]["K"])
+        self.model["map"] = MappingNetwork(
+            K=self.cfg["model"]["K"], D=self.cfg["model"]["D"]
+        )
+        self.model["se"] = StyleEncoder(
+            K=self.cfg["model"]["K"], D=self.cfg["model"]["D"]
+        )
 
-        self.BS = BS
-        self.K = K
-        self.D = D
-        self.EPOCHS = EPOCHS
-        self.log = False
+        # self.BS = BS
+        # self.K = K
+        # self.D = D
+        # self.EPOCHS = EPOCHS
+        self.log = log
 
         self.dataloader = dataloader
-        self.optimizer_g = AdamW(self.model["gen"].parameters(), lr=lr)
-        self.optimizer_d = AdamW(self.model["disc"].parameters(), lr=lr)
-        self.optimizer_s = AdamW(self.model["se"].parameters(), lr=lr)
-        self.optimizer_m = AdamW(self.model["map"].parameters(), lr=lr)
+        self.optimizer_g = AdamW(
+            self.model["gen"].parameters(), lr=self.cfg["training"]["lr"]
+        )
+        self.optimizer_d = AdamW(
+            self.model["disc"].parameters(), lr=self.cfg["training"]["lr"]
+        )
+        self.optimizer_s = AdamW(
+            self.model["se"].parameters(), lr=self.cfg["training"]["lr"]
+        )
+        self.optimizer_m = AdamW(
+            self.model["map"].parameters(), lr=self.cfg["training"]["lr"]
+        )
 
         if self.log:
-            config == {"wandb_project": "stargan2"}
-            self.logger = WanDBWriter(config)
+            self.logger = WanDBWriter(self.config)
 
         scheduler_g = None
         scheduler_d = None
@@ -39,27 +51,35 @@ class Trainer:
 
         step = 0
 
-        for epoch in range(self.EPOCHS):
+        for epoch in range(self.cfg["training"]["epochs"]):
             for batch in tqdm(self.dataloader):
+                # batch.to(self.device)
+                real = batch[0].to(self.device)
+
                 step += 1
 
                 self.logger.set_step(step) if self.log else None
 
                 for block in self.model.values():
                     block.train()
+                    block.to(self.device)
 
                 self.optimizer_g.zero_grad()
                 self.optimizer_d.zero_grad()
                 self.optimizer_s.zero_grad()
                 self.optimizer_m.zero_grad()
 
-                z = torch.randn((self.BS, 16))
-                z2 = torch.randn((self.BS, 16))
-                y_trg = torch.randint(size=(1, 1), low=0, high=self.K - 1).item()
+                z = torch.randn((self.cfg["training"]["batch_size"], 16)).to(
+                    self.device
+                )
+                z2 = torch.randn((self.cfg["training"]["batch_size"], 16)).to(
+                    self.device
+                )
+                y_trg = torch.randint(
+                    size=(1, 1), low=0, high=self.cfg["model"]["K"] - 1
+                ).item()
                 s = self.model["map"](z, y_trg)  # shape of (B, num_domains, 16)
                 s2 = self.model["map"](z2, y_trg)  # shape of (B, num_domains, 16)
-
-                real = batch[0]
 
                 fake = self.model["gen"](real, s)
                 fake2 = self.model["gen"](real, s2)
@@ -112,13 +132,6 @@ class Trainer:
                         style_rec_l.item(),
                         gnorms,
                     )
-
-                #     self.log_everything()
-
-                #     self.inference()
-
-                # if step % self.config["training"]["save_steps"] == 0:
-                #     save_checkpoint(...)
 
     def log_scalars(
         self, step, epoch, loss_g, loss_d, cycle_l, style_div_l, style_rec_l, gnorms
