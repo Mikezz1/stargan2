@@ -32,7 +32,7 @@ class Generator(nn.Module):
             # ResBlock(512, 512, nn.InstanceNorm2d(512)),
             # nn.AvgPool2d(2),
             # 4x4
-            ResBlock(512, 512, nn.InstanceNorm2d(512)),
+            # ResBlock(512, 512, nn.InstanceNorm2d(512)),
         )
         self.intermediate1 = nn.Sequential(
             ResBlock(512, 512, nn.InstanceNorm2d(512)),
@@ -53,13 +53,13 @@ class Generator(nn.Module):
                 # AdaINResBlock(512, 256),
                 # 8x8
                 # nn.Upsample(scale_factor=2),
-                AdaINResBlock(512, 128),
+                AdaINResBlock(512, 256),
                 # 16x16
                 nn.Upsample(scale_factor=2),
-                AdaINResBlock(128, 64),
+                AdaINResBlock(256, 128),
                 # 32x32
                 nn.Upsample(scale_factor=2),
-                AdaINResBlock(64, 64),
+                AdaINResBlock(128, 64),
                 # 64x64
             ]
         )

@@ -72,22 +72,31 @@ class Trainer:
                 z2 = torch.randn((self.cfg["training"]["batch_size"], 16)).to(
                     self.device
                 )
-                y_trg = torch.randint(
-                    size=(self.cfg["training"]["batch_size"], 1), low=0, high=self.K - 1
-                ).squeeze()
+                # y_trg = torch.randint(
+                #     size=(self.cfg["training"]["batch_size"], 1), low=0, high=self.K - 1
+                # ).squeeze()
+                y_trg = (
+                    (
+                        torch.randint(size=(1, 1), low=0, high=self.K - 1)
+                        * torch.ones(size=(self.cfg["training"]["batch_size"], 1))
+                    )
+                    .squeeze()
+                    .long()
+                )
+
                 s = self.model["map"](z, y_trg)
-                s1_5 = self.model["map"](z, y_trg)  # shape of (B, num_domains, 16)
+                # s1_5 = self.model["map"](z, y_trg)  # shape of (B, num_domains, 16)
                 s2 = self.model["map"](z2, y_trg)  # shape of (B, num_domains, 16)
 
                 fake = self.model["gen"](real, s)
-                fake1_5 = self.model["gen"](real, s1_5)
+                # fake1_5 = self.model["gen"](real, s1_5)
                 fake2 = self.model["gen"](real, s2)
                 s_fake = self.model["se"](fake, y_trg)
 
                 fake_reversed = self.model["gen"](fake, self.model["se"](real, y_src))
 
                 d_real = self.model["disc"](real, y_src)
-                d_fake_d = self.model["disc"](fake1_5, y_trg)
+                d_fake_d = self.model["disc"](fake.detach(), y_trg)
                 d_fake_g = self.model["disc"](fake, y_trg)
 
                 adv_fake_d = adversarial_loss(d_fake_d, 0)
@@ -98,7 +107,7 @@ class Trainer:
                 style_div_l = style_div_loss(fake, fake2)
                 cycle_l = cycle_loss(fake, fake_reversed)
 
-                loss_g = adv_fake_g + style_rec_l + cycle_l - 2 * style_div_l
+                loss_g = adv_fake_g + style_rec_l + cycle_l  # - 2 * style_div_l
                 loss_d = adv_real_d + adv_fake_d
 
                 loss_d.backward()
