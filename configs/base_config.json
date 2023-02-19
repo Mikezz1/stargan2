@@ -12,6 +12,7 @@
         "log": true
     },
     "data": {
+        "size": 32,
         "domains": [
             "Male"
         ],

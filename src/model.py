@@ -12,21 +12,21 @@ class DummyResampler(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self):
+    def __init__(self, size):
         super().__init__()
         self.in_conv = nn.Conv2d(
-            in_channels=3, out_channels=64, kernel_size=1, padding=0
+            in_channels=3, out_channels=size, kernel_size=1, padding=0
         )
-        self.out_conv = nn.Conv2d(64, 3, 1, padding=0)
+        self.out_conv = nn.Conv2d(size, 3, 1, padding=0)
         self.downsampling = nn.Sequential(
             # 64x64
-            ResBlock(64, 128, nn.InstanceNorm2d(64)),
+            ResBlock(size, size * 2, nn.InstanceNorm2d(size)),
             nn.AvgPool2d(2),
             # 32x32
-            ResBlock(128, 256, nn.InstanceNorm2d(128)),
+            ResBlock(size * 2, size * 4, nn.InstanceNorm2d(size * 2)),
             nn.AvgPool2d(2),
             # 16x16
-            ResBlock(256, 512, nn.InstanceNorm2d(256)),
+            ResBlock(size * 4, size * 8, nn.InstanceNorm2d(size * 4)),
             # nn.AvgPool2d(2),
             # 8x8
             # ResBlock(512, 512, nn.InstanceNorm2d(512)),
@@ -35,14 +35,14 @@ class Generator(nn.Module):
             # ResBlock(512, 512, nn.InstanceNorm2d(512)),
         )
         self.intermediate1 = nn.Sequential(
-            ResBlock(512, 512, nn.InstanceNorm2d(512)),
-            ResBlock(512, 512, nn.InstanceNorm2d(512)),
+            ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
+            ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
         )
 
         self.intermediate2 = nn.ModuleList(
             [
-                AdaINResBlock(512, 512),
-                AdaINResBlock(512, 512),
+                AdaINResBlock(size * 8, size * 8),
+                AdaINResBlock(size * 8, size * 8),
             ]
         )
 
@@ -53,13 +53,13 @@ class Generator(nn.Module):
                 # AdaINResBlock(512, 256),
                 # 8x8
                 # nn.Upsample(scale_factor=2),
-                AdaINResBlock(512, 256),
+                AdaINResBlock(size * 8, size * 4),
                 # 16x16
                 nn.Upsample(scale_factor=2),
-                AdaINResBlock(256, 128),
+                AdaINResBlock(size * 4, size * 2),
                 # 32x32
                 nn.Upsample(scale_factor=2),
-                AdaINResBlock(128, 64),
+                AdaINResBlock(size * 2, size),
                 # 64x64
             ]
         )
@@ -76,28 +76,28 @@ class Generator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, K):
+    def __init__(self, K, size):
         super().__init__()
-        self.in_conv = nn.Conv2d(3, 64, 3, padding=1)
+        self.in_conv = nn.Conv2d(3, size, 3, padding=1)
         self.downsampling = nn.Sequential(
-            ResBlock(64, 128),
+            ResBlock(size, size * 2, act=nn.LeakyReLU()),
             nn.AvgPool2d(2),
-            ResBlock(128, 256),
+            ResBlock(size * 2, size * 4, act=nn.LeakyReLU()),
             nn.AvgPool2d(2),
-            ResBlock(256, 512),
+            ResBlock(size * 4, size * 8, act=nn.LeakyReLU()),
             nn.AvgPool2d(2),
-            ResBlock(512, 512),
+            ResBlock(size * 8, size * 8, act=nn.LeakyReLU()),
             nn.AvgPool2d(2),
-            ResBlock(512, 512),
-            nn.AvgPool2d(2),
-            ResBlock(512, 512),
+            ResBlock(size * 8, size * 8, act=nn.LeakyReLU()),
+            # nn.AvgPool2d(2),
+            # ResBlock(size * 8, size * 8),
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(512, 512, 2, padding=0),
+            nn.Conv2d(size * 8, size * 8, 2, padding=0),
             nn.LeakyReLU(),
         )
-        self.out = nn.ModuleList([nn.Linear(512, 1) for _ in range(K)])
+        self.out = nn.ModuleList([nn.Linear(size * 8, 1) for _ in range(K)])
 
     def forward(self, x, y):
         x = self.in_conv(x)
@@ -157,28 +157,28 @@ class StyleEncoder(nn.Module):
     given generated image.
     """
 
-    def __init__(self, D, K):
+    def __init__(self, D, K, size):
         super().__init__()
-        self.in_conv = nn.Conv2d(3, 64, 3, padding=1)
+        self.in_conv = nn.Conv2d(3, size, 3, padding=1)
         self.downsampling = nn.Sequential(
-            ResBlock(64, 128),
+            ResBlock(size, size * 2),
             nn.AvgPool2d(2),
-            ResBlock(128, 256),
+            ResBlock(size * 2, size * 4),
             nn.AvgPool2d(2),
-            ResBlock(256, 512),
+            ResBlock(size * 4, size * 8),
             nn.AvgPool2d(2),
-            ResBlock(512, 512),
+            ResBlock(size * 8, size * 8),
             nn.AvgPool2d(2),
-            ResBlock(512, 512),
-            nn.AvgPool2d(2),
-            ResBlock(512, 512),
+            ResBlock(size * 8, size * 8),
+            # nn.AvgPool2d(2),
+            # ResBlock(size * 8, size * 8),
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(512, 512, 2, padding=0),
+            nn.Conv2d(size * 8, size * 8, 2, padding=0),
             nn.LeakyReLU(),
         )
-        self.out = nn.ModuleList([nn.Linear(512, D) for _ in range(K)])
+        self.out = nn.ModuleList([nn.Linear(size * 8, D) for _ in range(K)])
 
     def forward(self, x, y):
         x = self.in_conv(x)

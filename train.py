@@ -34,8 +34,8 @@ set_seed()
 
 transform = transforms.Compose(
     [
-        transforms.Resize((64, 64)),
-        transforms.CenterCrop(64),
+        transforms.Resize((config["data"]["size"], config["data"]["size"])),
+        transforms.CenterCrop(config["data"]["size"]),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ]
@@ -64,3 +64,4 @@ trainer = Trainer(config=config, dataloader=dataloader, log=config["training"]["
 if __name__ == "__main__":
 
     trainer.train()
+    gc.collect()

@@ -13,10 +13,11 @@ class Trainer:
         self.device = self.cfg["training"]["device"]
         self.model = dict()
         self.K = 2 ** len(self.cfg["data"]["domains"])
-        self.model["gen"] = Generator()
-        self.model["disc"] = Discriminator(K=self.K)
+        size = self.cfg["data"]["size"]
+        self.model["gen"] = Generator(size=size)
+        self.model["disc"] = Discriminator(K=self.K, size=size)
         self.model["map"] = MappingNetwork(K=self.K, D=self.cfg["model"]["D"])
-        self.model["se"] = StyleEncoder(K=self.K, D=self.cfg["model"]["D"])
+        self.model["se"] = StyleEncoder(K=self.K, D=self.cfg["model"]["D"], size=size)
 
         # self.BS = BS
         # self.K = K
@@ -77,7 +78,7 @@ class Trainer:
                 # ).squeeze()
                 y_trg = (
                     (
-                        torch.randint(size=(1, 1), low=0, high=self.K - 1)
+                        torch.randint(size=(1, 1), low=0, high=self.K)
                         * torch.ones(size=(self.cfg["training"]["batch_size"], 1))
                     )
                     .squeeze()
@@ -97,24 +98,26 @@ class Trainer:
 
                 d_real = self.model["disc"](real, y_src)
                 d_fake_d = self.model["disc"](fake.detach(), y_trg)
-                d_fake_g = self.model["disc"](fake, y_trg)
 
                 adv_fake_d = adversarial_loss(d_fake_d, 0)
-                adv_fake_g = adversarial_loss(d_fake_g, 1)
                 adv_real_d = adversarial_loss(d_real, 1)
+                loss_d = adv_real_d + adv_fake_d
+
+                loss_d.backward()
+                self.optimizer_d.step()
+
+                d_fake_g = self.model["disc"](fake, y_trg)
+                adv_fake_g = adversarial_loss(d_fake_g, 1)
 
                 style_rec_l = style_rec_loss(s, s_fake)
                 style_div_l = style_div_loss(fake, fake2)
                 cycle_l = cycle_loss(fake, fake_reversed)
 
                 loss_g = adv_fake_g + style_rec_l + cycle_l  # - 2 * style_div_l
-                loss_d = adv_real_d + adv_fake_d
 
-                loss_d.backward()
                 loss_g.backward()
 
                 self.optimizer_g.step()
-                self.optimizer_d.step()
                 self.optimizer_s.step()
                 self.optimizer_m.step()
 
