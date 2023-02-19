@@ -19,7 +19,8 @@ class CelebADataset(Dataset):
         self,
         root_dir=os.path.join(CUR_DIR, "../../data/celeba"),
         transform=None,
-        domains=["Male"],
+        domains=["Male", "Blond_Hair"],
+        limit=None,
     ):
         """
         Args:
@@ -55,6 +56,8 @@ class CelebADataset(Dataset):
         with open(f"{root_dir}/list_attr_celeba.txt") as f:
             for i, line in enumerate(f.readlines()):
                 line = re.sub(" *\n", "", line)
+                if limit is not None and i >= limit + 2:
+                    break
                 if i == 0:
                     # first line - len of dataset, second - attributes header
                     continue

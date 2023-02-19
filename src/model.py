@@ -15,7 +15,7 @@ class Generator(nn.Module):
     def __init__(self):
         super().__init__()
         self.in_conv = nn.Conv2d(
-            in_channels=3, out_channels=64, kernel_size=3, padding=1
+            in_channels=3, out_channels=64, kernel_size=1, padding=0
         )
         self.out_conv = nn.Conv2d(64, 3, 1, padding=0)
         self.downsampling = nn.Sequential(
@@ -27,10 +27,10 @@ class Generator(nn.Module):
             nn.AvgPool2d(2),
             # 16x16
             ResBlock(256, 512, nn.InstanceNorm2d(256)),
-            nn.AvgPool2d(2),
+            # nn.AvgPool2d(2),
             # 8x8
-            ResBlock(512, 512, nn.InstanceNorm2d(512)),
-            nn.AvgPool2d(2),
+            # ResBlock(512, 512, nn.InstanceNorm2d(512)),
+            # nn.AvgPool2d(2),
             # 4x4
             ResBlock(512, 512, nn.InstanceNorm2d(512)),
         )
@@ -49,11 +49,11 @@ class Generator(nn.Module):
         self.upsampling = nn.ModuleList(
             [
                 # 4x4
-                nn.Upsample(scale_factor=2),
-                AdaINResBlock(512, 256),
+                # nn.Upsample(scale_factor=2),
+                # AdaINResBlock(512, 256),
                 # 8x8
-                nn.Upsample(scale_factor=2),
-                AdaINResBlock(256, 128),
+                # nn.Upsample(scale_factor=2),
+                AdaINResBlock(512, 128),
                 # 16x16
                 nn.Upsample(scale_factor=2),
                 AdaINResBlock(128, 64),
