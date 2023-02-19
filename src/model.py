@@ -12,7 +12,7 @@ class DummyResampler(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, size):
+    def __init__(self, size, D):
         super().__init__()
         self.in_conv = nn.Conv2d(
             in_channels=3, out_channels=size, kernel_size=1, padding=0
@@ -28,11 +28,11 @@ class Generator(nn.Module):
             # 16x16
             ResBlock(size * 4, size * 8, nn.InstanceNorm2d(size * 4)),
             # nn.AvgPool2d(2),
-            # 8x8
-            # ResBlock(512, 512, nn.InstanceNorm2d(512)),
+            # # 8x8
+            # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
             # nn.AvgPool2d(2),
-            # 4x4
-            # ResBlock(512, 512, nn.InstanceNorm2d(512)),
+            # # 4x4
+            # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(512)),
         )
         self.intermediate1 = nn.Sequential(
             ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
@@ -41,8 +41,8 @@ class Generator(nn.Module):
 
         self.intermediate2 = nn.ModuleList(
             [
-                AdaINResBlock(size * 8, size * 8),
-                AdaINResBlock(size * 8, size * 8),
+                AdaINResBlock(size * 8, size * 8, D),
+                AdaINResBlock(size * 8, size * 8, D),
             ]
         )
 
@@ -50,16 +50,17 @@ class Generator(nn.Module):
             [
                 # 4x4
                 # nn.Upsample(scale_factor=2),
-                # AdaINResBlock(512, 256),
-                # 8x8
+                # AdaINResBlock(size * 8, size * 8, D),
+                # # 8x8
                 # nn.Upsample(scale_factor=2),
-                AdaINResBlock(size * 8, size * 4),
+                # AdaINResBlock(size * 8, size * 4, D),
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(size * 8, size * 4, D),
                 # 16x16
                 nn.Upsample(scale_factor=2),
-                AdaINResBlock(size * 4, size * 2),
+                AdaINResBlock(size * 4, size * 2, D),
                 # 32x32
-                nn.Upsample(scale_factor=2),
-                AdaINResBlock(size * 2, size),
+                AdaINResBlock(size * 2, size, D),
                 # 64x64
             ]
         )
@@ -119,18 +120,18 @@ class MappingNetwork(nn.Module):
     def __init__(self, K, D):
         super().__init__()
         self.backbone = nn.Sequential(
-            self.get_fc_block(16, 512),
-            self.get_fc_block(512, 512),
-            self.get_fc_block(512, 512),
-            self.get_fc_block(512, 512),
+            self.get_fc_block(16, 128),
+            self.get_fc_block(128, 128),
+            self.get_fc_block(128, 128),
+            self.get_fc_block(128, 128),
         )
         self.heads = nn.ModuleList(
             [
                 nn.Sequential(
-                    self.get_fc_block(512, 512),
-                    self.get_fc_block(512, 512),
-                    self.get_fc_block(512, 512),
-                    self.get_fc_block(512, D, activation=False),
+                    self.get_fc_block(128, 128),
+                    self.get_fc_block(128, 128),
+                    self.get_fc_block(128, 128),
+                    self.get_fc_block(128, D, activation=False),
                 )
                 for j in range(K)
             ]
@@ -215,17 +216,15 @@ class ResBlock(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         if self.out_channels != self.in_channels:
-            self.proj_conv = nn.Conv2d(
-                in_channels, out_channels, 1, padding=0, bias=False
-            )
+            self.proj_conv = nn.Conv2d(in_channels, out_channels, 1, padding=0)
 
         self.layers = nn.Sequential(
             self.norm,
             self.act,
-            nn.Conv2d(in_channels, in_channels, 3, padding=1, bias=False),
+            nn.Conv2d(in_channels, in_channels, 3, padding=1),
             self.norm,
             self.act,
-            nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+            nn.Conv2d(in_channels, out_channels, 3, padding=1),
         )
 
     def forward(self, x, s=None):
@@ -247,25 +246,23 @@ class AdaINResBlock(nn.Module):
         pre_resampler (nn.Module): ConvTranspoce or Upsample for upsampling blocks
     """
 
-    def __init__(self, in_channels, out_channels, act=nn.ReLU()):
+    def __init__(self, in_channels, out_channels, D, act=nn.ReLU()):
         super().__init__()
         self.act = act
-        self.style_dim = 64
+        self.style_dim = D
         self.in_channels = in_channels
         self.out_channels = out_channels
         if self.out_channels != self.in_channels:
-            self.proj_conv = nn.Conv2d(
-                in_channels, out_channels, 1, padding=0, bias=False
-            )
+            self.proj_conv = nn.Conv2d(in_channels, out_channels, 1, padding=0)
 
         self.layers = nn.ModuleList(
             [
                 AdaIN(in_channels, self.style_dim),
                 self.act,
-                nn.Conv2d(in_channels, in_channels, 3, padding=1, bias=False),
+                nn.Conv2d(in_channels, in_channels, 3, padding=1),
                 AdaIN(in_channels, self.style_dim),
                 self.act,
-                nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+                nn.Conv2d(in_channels, out_channels, 3, padding=1),
             ]
         )
 
@@ -292,7 +289,7 @@ class AdaIN(nn.Module):
     def forward(self, x, s):
 
         mu_style = self.mu_projector(s)
-        sigma_projector = self.mu_projector(s)
+        sigma_projector = self.sigma_projector(s)
         # x ~ (B, C, H, W), mu/std ~ (B, C)
         mu_style = mu_style.unsqueeze(2).unsqueeze(3)
         sigma_projector = sigma_projector.unsqueeze(2).unsqueeze(3)

@@ -14,7 +14,7 @@ class Trainer:
         self.model = dict()
         self.K = 2 ** len(self.cfg["data"]["domains"])
         size = self.cfg["data"]["size"]
-        self.model["gen"] = Generator(size=size)
+        self.model["gen"] = Generator(size=size, D=self.cfg["model"]["D"])
         self.model["disc"] = Discriminator(K=self.K, size=size)
         self.model["map"] = MappingNetwork(K=self.K, D=self.cfg["model"]["D"])
         self.model["se"] = StyleEncoder(K=self.K, D=self.cfg["model"]["D"], size=size)
@@ -44,6 +44,47 @@ class Trainer:
         scheduler_g = None
         scheduler_d = None
 
+    def discriminator_step(self, real, y_src, y_trg):
+        real = real.requires_grad_()
+        d_real = self.model["disc"](real, y_src)
+
+        with torch.no_grad():
+            z = torch.randn((self.cfg["training"]["batch_size"], 16)).to(self.device)
+            s = self.model["map"](z, y_trg)
+            fake = self.model["gen"](real, s)
+
+        d_fake = self.model["disc"](fake, y_trg)
+
+        return adversarial_loss(d_real, 1), adversarial_loss(d_fake, 0)
+
+    def generator_step(self, real, y_src, y_trg):
+
+        # ------------------------------------
+        # --------- Adversarial Loss
+        z = torch.randn((self.cfg["training"]["batch_size"], 16)).to(self.device)
+        s = self.model["map"](z, y_trg)
+        fake = self.model["gen"](real, s)
+        adv_loss_g = adversarial_loss(self.model["disc"](fake, y_trg), 1)
+
+        # ------------------------------------
+        # --------- Cycle Loss
+        fake_reversed = self.model["gen"](fake, self.model["se"](fake, y_src))
+        c_loss = cycle_loss(fake_reversed, real)
+
+        # ------------------------------------
+        # --------- Style reconstruction Loss
+        s_fake = self.model["se"](fake, y_trg)
+        s_rec_loss = style_rec_loss(s, s_fake)
+        # ------------------------------------
+        # --------- Style divergence Loss
+        z2 = torch.randn((self.cfg["training"]["batch_size"], 16)).to(self.device)
+        s2 = self.model["map"](z2, y_trg)
+        fake2 = self.model["gen"](real, s2)
+
+        style_div_l = style_div_loss(fake, fake2)
+
+        return adv_loss_g, c_loss, s_rec_loss, style_div_l, fake
+
     def train(self):
 
         step = 0
@@ -52,7 +93,7 @@ class Trainer:
             for batch in tqdm(self.dataloader):
                 # batch.to(self.device)
                 real = batch[0].to(self.device)
-                y_src = batch[1]["attributes"]
+                y_src = batch[1]["attributes"].to(self.device)
 
                 step += 1
 
@@ -67,56 +108,43 @@ class Trainer:
                 self.optimizer_s.zero_grad()
                 self.optimizer_m.zero_grad()
 
-                z = torch.randn((self.cfg["training"]["batch_size"], 16)).to(
-                    self.device
-                )
-                z2 = torch.randn((self.cfg["training"]["batch_size"], 16)).to(
-                    self.device
-                )
                 # y_trg = torch.randint(
                 #     size=(self.cfg["training"]["batch_size"], 1), low=0, high=self.K - 1
                 # ).squeeze()
+                # y_trg = (
+                #     (
+                #         torch.randint(size=(1, 1), low=0, high=self.K)
+                #         * torch.ones(size=(self.cfg["training"]["batch_size"], 1))
+                #     )
+                #     .squeeze()
+                #     .long()
+                # )
                 y_trg = (
-                    (
-                        torch.randint(size=(1, 1), low=0, high=self.K)
-                        * torch.ones(size=(self.cfg["training"]["batch_size"], 1))
-                    )
-                    .squeeze()
-                    .long()
-                )
+                    torch.ones(size=(self.cfg["training"]["batch_size"], 1)).squeeze()
+                    - y_src
+                ).long()
 
-                s = self.model["map"](z, y_trg)
-                # s1_5 = self.model["map"](z, y_trg)  # shape of (B, num_domains, 16)
-                s2 = self.model["map"](z2, y_trg)  # shape of (B, num_domains, 16)
+                assert all(y_trg != y_src)
 
-                fake = self.model["gen"](real, s)
-                # fake1_5 = self.model["gen"](real, s1_5)
-                fake2 = self.model["gen"](real, s2)
-                s_fake = self.model["se"](fake, y_trg)
-
-                fake_reversed = self.model["gen"](fake, self.model["se"](real, y_src))
-
-                d_real = self.model["disc"](real, y_src)
-                d_fake_d = self.model["disc"](fake.detach(), y_trg)
-
-                adv_fake_d = adversarial_loss(d_fake_d, 0)
-                adv_real_d = adversarial_loss(d_real, 1)
+                # -----------------------
+                # ------ DISCRIMINATOR --
+                adv_real_d, adv_fake_d = self.discriminator_step(real, y_src, y_trg)
                 loss_d = adv_real_d + adv_fake_d
-
                 loss_d.backward()
                 self.optimizer_d.step()
 
-                d_fake_g = self.model["disc"](fake, y_trg)
-                adv_fake_g = adversarial_loss(d_fake_g, 1)
+                # -----------------------
+                # ------ GENERATOR ------
 
-                style_rec_l = style_rec_loss(s, s_fake)
-                style_div_l = style_div_loss(fake, fake2)
-                cycle_l = cycle_loss(fake, fake_reversed)
-
-                loss_g = adv_fake_g + style_rec_l + cycle_l  # - 2 * style_div_l
-
+                (
+                    adv_fake_g,
+                    cycle_l,
+                    style_rec_l,
+                    style_div_l,
+                    fake,
+                ) = self.generator_step(real, y_src, y_trg)
+                loss_g = adv_fake_g + cycle_l + style_rec_l  # - 2 * style_div_l
                 loss_g.backward()
-
                 self.optimizer_g.step()
                 self.optimizer_s.step()
                 self.optimizer_m.step()
@@ -141,7 +169,7 @@ class Trainer:
                         style_rec_l.item(),
                         gnorms,
                     )
-                    self.log_images(fake_reversed, real)
+                    self.log_images(fake, real)
 
     def log_scalars(
         self,

@@ -4,11 +4,11 @@
         "D": 64
     },
     "training": {
-        "batch_size": 5,
+        "batch_size": 4,
         "epochs": 100,
         "device": "cpu",
         "lr": 1e-4,
-        "log_steps": 5,
+        "log_steps": 20,
         "log": true
     },
     "data": {
