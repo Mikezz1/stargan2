@@ -48,18 +48,34 @@ dataset = CelebADataset(
     domains=config["data"]["domains"],
     limit=config["data"]["limit"],
 )
+
+train_ds, val_ds = torch.utils.data.random_split(dataset, [0.9, 0.1])
+
 num_workers = 0 if device == "cuda" else 0
 pin_memory = True if device == "cuda" else False
-dataloader = torch.utils.data.DataLoader(
-    dataset,
+train_dataloader = torch.utils.data.DataLoader(
+    train_ds,
     batch_size=config["training"]["batch_size"],
     num_workers=num_workers,
     pin_memory=pin_memory,
     shuffle=True,
     drop_last=True,
 )
+val_dataloader = torch.utils.data.DataLoader(
+    val_ds,
+    batch_size=config["training"]["batch_size"],
+    num_workers=num_workers,
+    pin_memory=pin_memory,
+    shuffle=False,
+    drop_last=True,
+)
 
-trainer = Trainer(config=config, dataloader=dataloader, log=config["training"]["log"])
+trainer = Trainer(
+    config=config,
+    dataloader=train_dataloader,
+    val_dataloader=val_dataloader,
+    log=config["training"]["log"],
+)
 
 if __name__ == "__main__":
 
