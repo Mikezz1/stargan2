@@ -5,6 +5,7 @@ from src.model import *
 from torch.optim import AdamW
 from src.logger import WanDBWriter
 import copy
+from lpips_pytorch import LPIPS
 
 
 class Trainer:
@@ -74,9 +75,37 @@ class Trainer:
 
     def eval(self):
 
-        # lpips
+        criterion = LPIPS(net_type="alex", version="0.1")
 
-        # fid
+        with torch.no_grad():
+            lpipses = []
+            for batch in self.val_dataloader:
+                real = batch[0].to(self.device)
+                y_src = batch[1]["attributes"].to(self.device)
+                y_trg = (
+                    torch.ones(size=(self.cfg["training"]["batch_size"] * 2, 1))
+                    .squeeze()
+                    .to(self.device)
+                    - y_src
+                ).long()
+
+                zs_trg = torch.randn(
+                    (10, self.cfg["training"]["batch_size"] * 2, 16)
+                ).to(
+                    self.device
+                )  # num_samples x batch x  size
+
+                styles = [
+                    self.avg_model["map"](z, y_trg) for z, y_trg in zip(zs_trg, y_trg)
+                ]
+                fakes = [self.avg_model["gen"](real, s) for s in styles]
+                lpips = [criterion(real, fake) for fake in fakes]
+
+                lpipses.extend(lpips)
+            metric = torch.mean(torch.stack(lpipses))
+
+            self.logger.add_scalar("lpips_val_latent", metric)
+
         pass
 
     def discriminator_step(self, real, y_src, y_trg):
@@ -205,6 +234,7 @@ class Trainer:
                 )
 
                 if (self.log) and (step % self.cfg["training"]["log_steps"] == 0):
+                    self.eval()
                     gnorm_g = self.get_grad_norm(self.model["gen"])
                     gnorm_d = self.get_grad_norm(self.model["disc"])
                     gnorm_m = self.get_grad_norm(self.model["map"])
