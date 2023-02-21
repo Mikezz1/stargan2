@@ -142,9 +142,17 @@ class Trainer:
 
         adv_loss_g = adversarial_loss(self.model["disc"](fake, y_ref), 1)
 
-        adv_loss_d = adversarial_loss(self.model["disc"](fake.detach(), y_ref), 0)
+        d_fake = self.model["disc"](fake.detach(), y_ref)
+        d_real = self.model["disc"](real_ref.detach(), y_ref)
+        r_loss = self.r1(d_real, real_ref)
+        adv_loss_d = (
+            adversarial_loss(d_fake.detach(), 0) + adversarial_loss(d_real, 1) + r_loss
+        )
 
-        return adv_loss_g, adv_loss_d  # add div_loss
+        return (
+            adv_loss_g,
+            adv_loss_d,
+        )  # add div_loss
 
     def generator_step(self, real, y_src, y_trg):
 
