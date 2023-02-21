@@ -4,3 +4,4 @@ unzip
 wandb
 tqdm
 gdown
+git+https://github.com/S-aiueo32/lpips-pytorch.git

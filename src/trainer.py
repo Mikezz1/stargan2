@@ -55,7 +55,7 @@ class Trainer:
             self.model["se"].parameters(), lr=self.cfg["training"]["lr"]
         )
         self.optimizer_m = AdamW(
-            self.model["map"].parameters(), lr=self.cfg["training"]["lr"] / 100
+            self.model["map"].parameters(), lr=self.cfg["training"]["lr"] / 10
         )
 
         self.logger = WanDBWriter(self.cfg) if self.log else None
@@ -129,6 +129,7 @@ class Trainer:
         return adversarial_loss(d_real, 1), adversarial_loss(d_fake, 0), r_loss
 
     def rec_step(self, real, y_src):
+        real = real.requires_grad_()
 
         # generate source images from the same batch by fliping input tensor along batch dim
 
@@ -151,6 +152,7 @@ class Trainer:
         )  # add div_loss
 
     def generator_step(self, real, y_src, y_trg):
+        real = real.requires_grad_()
 
         # ------------------------------------
         # --------- Adversarial Loss
@@ -175,7 +177,7 @@ class Trainer:
         fake2 = self.model["gen"](real, s2)
         style_div_l = style_div_loss(fake, fake2.detach())
 
-        return adv_loss_g, c_loss, s_rec_loss, style_div_l, fake
+        return adv_loss_g, c_loss, s_rec_loss, style_div_l, fake, fake_reversed
 
     def train(self):
 
@@ -200,14 +202,24 @@ class Trainer:
                 self.optimizer_s.zero_grad()
                 self.optimizer_m.zero_grad()
 
-                y_trg = (
-                    torch.ones(size=(self.cfg["training"]["batch_size"], 1))
-                    .squeeze()
-                    .to(self.device)
-                    - y_src
-                ).long()
+                if self.cfg["training"]["random_target"]:
+                    y_trg = (
+                        torch.randint(
+                            size=(self.cfg["training"]["batch_size"], 1), low=0, high=2
+                        )
+                        .squeeze()
+                        .to(self.device)
+                    ).long()
 
-                assert all(y_trg != y_src)
+                else:
+                    y_trg = (
+                        torch.ones(size=(self.cfg["training"]["batch_size"], 1))
+                        .squeeze()
+                        .to(self.device)
+                        - y_src
+                    ).long()
+
+                # assert all(y_trg != y_src)
 
                 # -----------------------
                 # ------ DISCRIMINATOR --
@@ -227,9 +239,12 @@ class Trainer:
                     style_rec_l,
                     style_div_l,
                     fake,
+                    fake_rec,
                 ) = self.generator_step(real, y_src, y_trg)
 
-                loss_g = adv_fake_g + cycle_l + style_rec_l  # - 2 * style_div_l
+                loss_g = (
+                    adv_fake_g + cycle_l + style_rec_l - style_div_l * (0.9995**step)
+                )
                 loss_g.backward()
                 self.optimizer_g.step()
                 self.optimizer_s.step()
@@ -277,7 +292,7 @@ class Trainer:
                         style_rec_l.item(),
                         gnorms,
                     )
-                    self.log_images(fake, real)
+                    self.log_images(fake, fake_rec, real)
 
     def log_scalars(
         self,
@@ -310,8 +325,9 @@ class Trainer:
         for grad_norm, label in zip(gnorms, ["G_gn", "D_gn", "M_gn", "SE_gn"]):
             self.logger.add_scalar(label, grad_norm)
 
-    def log_images(self, fake, real):
+    def log_images(self, fake, fake_rec, real):
         self.logger.add_image("fake", fake)
+        self.logger.add_image("fake_rec", fake_rec)
         self.logger.add_image("real", real)
 
     @torch.no_grad()

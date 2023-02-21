@@ -9,7 +9,8 @@
         "device": "cuda",
         "lr": 1e-4,
         "log_steps": 80,
-        "log": true
+        "log": true,
+        "random_target": true
     },
     "data": {
         "size": 32,

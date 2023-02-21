@@ -27,7 +27,6 @@ class Generator(nn.Module):
             nn.AvgPool2d(2),
             # 16x16
             ResBlock(size * 4, size * 8, nn.InstanceNorm2d(size * 4)),
-            # nn.AvgPool2d(2),
             # # 8x8
             # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
             # nn.AvgPool2d(2),
@@ -36,8 +35,8 @@ class Generator(nn.Module):
         )
         self.intermediate = nn.Sequential(
             ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
-            # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
-            # AdaINResBlock(size * 8, size * 8, D),
+            ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
+            AdaINResBlock(size * 8, size * 8, D),
             AdaINResBlock(size * 8, size * 8, D),
         )
 
@@ -84,12 +83,10 @@ class Discriminator(nn.Module):
             ResBlock(size * 8, size * 8, act=nn.LeakyReLU()),
             nn.AvgPool2d(2),
             ResBlock(size * 8, size * 8, act=nn.LeakyReLU()),
-            # nn.AvgPool2d(2),
-            # ResBlock(size * 8, size * 8),
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 8, size * 8, 4, padding=0),
+            nn.Conv2d(size * 8, size * 8, 2, padding=0),
             nn.LeakyReLU(),
         )
         self.out = nn.ModuleList([nn.Linear(size * 8, 1) for _ in range(K)])
@@ -115,18 +112,18 @@ class MappingNetwork(nn.Module):
     def __init__(self, K, D):
         super().__init__()
         self.backbone = nn.Sequential(
-            self.get_fc_block(16, 128),
-            self.get_fc_block(128, 128),
-            self.get_fc_block(128, 128),
-            self.get_fc_block(128, 128),
+            self.get_fc_block(16, 256),
+            self.get_fc_block(256, 256),
+            self.get_fc_block(256, 256),
+            self.get_fc_block(256, 256),
         )
         self.heads = nn.ModuleList(
             [
                 nn.Sequential(
-                    self.get_fc_block(128, 128),
-                    self.get_fc_block(128, 128),
-                    self.get_fc_block(128, 128),
-                    self.get_fc_block(128, D, activation=False),
+                    self.get_fc_block(256, 256),
+                    self.get_fc_block(256, 256),
+                    self.get_fc_block(256, 256),
+                    self.get_fc_block(256, D, activation=False),
                 )
                 for j in range(K)
             ]
@@ -166,12 +163,10 @@ class StyleEncoder(nn.Module):
             ResBlock(size * 8, size * 8),
             nn.AvgPool2d(2),
             ResBlock(size * 8, size * 8),
-            # nn.AvgPool2d(2),
-            # ResBlock(size * 8, size * 8),
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 8, size * 8, 4, padding=0),
+            nn.Conv2d(size * 8, size * 8, 2, padding=0),
             nn.LeakyReLU(),
         )
         self.out = nn.ModuleList([nn.Linear(size * 8, D) for _ in range(K)])

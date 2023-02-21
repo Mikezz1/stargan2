@@ -9,10 +9,11 @@
         "device": "cpu",
         "lr": 1e-4,
         "log_steps": 4,
-        "log": true
+        "log": true,
+        "random_target": true
     },
     "data": {
-        "size": 64,
+        "size": 32,
         "domains": [
             "Male"
         ],
