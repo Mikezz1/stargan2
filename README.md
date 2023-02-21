@@ -10,3 +10,7 @@
 - fix label calc for multidomain setting
 - R1 regularization
 - style div loss decay
+- gradient clipping мб
+- MA for training
+- noisy labels
+

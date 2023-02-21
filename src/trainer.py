@@ -55,7 +55,7 @@ class Trainer:
             self.model["se"].parameters(), lr=self.cfg["training"]["lr"]
         )
         self.optimizer_m = AdamW(
-            self.model["map"].parameters(), lr=self.cfg["training"]["lr"]
+            self.model["map"].parameters(), lr=self.cfg["training"]["lr"] / 100
         )
 
         self.logger = WanDBWriter(self.cfg) if self.log else None
@@ -75,46 +75,44 @@ class Trainer:
 
     def eval(self):
 
-        criterion = LPIPS(net_type="alex", version="0.1")
-        criterion = criterion.to(self.device)
-        # fid = FrechetInceptionDistance(feature=64)
-        n_examples = 10
+        # criterion = LPIPS(net_type="alex", version="0.1")
+        # criterion = criterion.to(self.device)
+        # # fid = FrechetInceptionDistance(feature=64)
+        # n_examples = 10
 
-        with torch.no_grad():
-            lpipses = []
-            for batch in self.val_dataloader:
-                real = batch[0].to(self.device)
-                y_src = batch[1]["attributes"].to(self.device)
-                y_trg = (
-                    torch.ones(size=(self.cfg["training"]["batch_size"] * 2, 1))
-                    .squeeze()
-                    .to(self.device)
-                    - y_src
-                ).long()
+        # with torch.no_grad():
+        #     lpipses = []
+        #     for batch in self.val_dataloader:
+        #         real = batch[0].to(self.device)
+        #         y_src = batch[1]["attributes"].to(self.device)
+        #         y_trg = (
+        #             torch.ones(size=(self.cfg["training"]["batch_size"] * 2, 1))
+        #             .squeeze()
+        #             .to(self.device)
+        #             - y_src
+        #         ).long()
 
-                zs_trg = torch.randn(
-                    (n_examples, self.cfg["training"]["batch_size"] * 2, 16)
-                ).to(
-                    self.device
-                )  # num_samples x batch x  size
+        #         zs_trg = torch.randn(
+        #             (n_examples, self.cfg["training"]["batch_size"] * 2, 16)
+        #         ).to(
+        #             self.device
+        #         )  # num_samples x batch x  size
 
-                # нужно в стайл энкодер подавать что-то с первой размерностью в виде батчсайза
+        #         # нужно в стайл энкодер подавать что-то с первой размерностью в виде батчсайза
 
-                styles = [self.avg_model["map"](z, y_trg) for z in zs_trg]
-                fakes = torch.stack([self.avg_model["gen"](real, s) for s in styles])
-                # self.avg_model["gen"](real, s) (B, 3,H,W)
-                fakes = fakes.permute(1, 0, 2, 3, 4)
-                # self.avg_model["gen"](real, s) (B, 3,H,W, 10)
-                for reference_set in fakes:
-                    for i, im1 in enumerate(reference_set):
-                        for j, im2 in enumerate(reference_set):
-                            if i > j:
-                                lpipses.append(criterion(im1, im2))
-            metric = torch.mean(torch.stack(lpipses))
+        #         styles = [self.avg_model["map"](z, y_trg) for z in zs_trg]
+        #         fakes = torch.stack([self.avg_model["gen"](real, s) for s in styles])
+        #         # self.avg_model["gen"](real, s) (B, 3,H,W)
+        #         fakes = fakes.permute(1, 0, 2, 3, 4)
+        #         # self.avg_model["gen"](real, s) (B, 3,H,W, 10)
+        #         for reference_set in fakes:
+        #             for i, im1 in enumerate(reference_set):
+        #                 for j, im2 in enumerate(reference_set):
+        #                     if i > j:
+        #                         lpipses.append(criterion(im1, im2))
+        #     metric = torch.mean(torch.stack(lpipses))
 
-            self.logger.add_scalar("lpips_val_latent", metric)
-
-        pass
+        self.logger.add_scalar("lpips_val_latent", 0)
 
     def discriminator_step(self, real, y_src, y_trg):
         real = real.requires_grad_()
@@ -145,9 +143,7 @@ class Trainer:
         d_fake = self.model["disc"](fake.detach(), y_ref)
         d_real = self.model["disc"](real_ref, y_ref)
         r_loss = self.r1(d_real, real_ref)
-        adv_loss_d = (
-            adversarial_loss(d_fake.detach(), 0) + adversarial_loss(d_real, 1) + r_loss
-        )
+        adv_loss_d = adversarial_loss(d_fake, 0) + adversarial_loss(d_real, 1) + r_loss
 
         return (
             adv_loss_g,

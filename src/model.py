@@ -34,16 +34,11 @@ class Generator(nn.Module):
             # # 4x4
             # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(512)),
         )
-        self.intermediate1 = nn.Sequential(
+        self.intermediate = nn.Sequential(
             ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
-            ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
-        )
-
-        self.intermediate2 = nn.ModuleList(
-            [
-                AdaINResBlock(size * 8, size * 8, D),
-                AdaINResBlock(size * 8, size * 8, D),
-            ]
+            # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
+            # AdaINResBlock(size * 8, size * 8, D),
+            AdaINResBlock(size * 8, size * 8, D),
         )
 
         self.upsampling = nn.ModuleList(
@@ -68,8 +63,7 @@ class Generator(nn.Module):
     def forward(self, x, s):
         x = self.in_conv(x)
         x = self.downsampling(x)
-        x = self.intermediate1(x)
-        for layer in self.intermediate2:
+        for layer in self.intermediate:
             x = layer(x, s)
         for layer in self.upsampling:
             x = layer(x, s) if isinstance(layer, AdaINResBlock) else layer(x)
@@ -95,7 +89,7 @@ class Discriminator(nn.Module):
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 8, size * 8, 2, padding=0),
+            nn.Conv2d(size * 8, size * 8, 4, padding=0),
             nn.LeakyReLU(),
         )
         self.out = nn.ModuleList([nn.Linear(size * 8, 1) for _ in range(K)])
@@ -106,6 +100,7 @@ class Discriminator(nn.Module):
         x = self.conv(x)
         x = x.squeeze(3).squeeze(2)
         out = torch.stack([layer(x) for layer in self.out], dim=1)
+
         out = out[range(x.size(0)), y]
         return out
 
@@ -176,7 +171,7 @@ class StyleEncoder(nn.Module):
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 8, size * 8, 2, padding=0),
+            nn.Conv2d(size * 8, size * 8, 4, padding=0),
             nn.LeakyReLU(),
         )
         self.out = nn.ModuleList([nn.Linear(size * 8, D) for _ in range(K)])
