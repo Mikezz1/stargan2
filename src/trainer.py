@@ -7,6 +7,8 @@ from src.logger import WanDBWriter
 import copy
 from lpips_pytorch import LPIPS
 
+# from torchmetrics.image.fid import FrechetInceptionDistance
+
 
 class Trainer:
     def __init__(self, dataloader, val_dataloader, config, log):
@@ -27,6 +29,8 @@ class Trainer:
             K=self.K, D=self.cfg["model"]["D"], size=size
         )
 
+        self.r1 = R1(w=1)
+
         # for _, model in self.model.items():
         #     model.apply(self.init_weights)
 
@@ -37,10 +41,6 @@ class Trainer:
         self.avg_model["map"] = copy.deepcopy(self.model["map"]).to(self.device)
         self.avg_model["gen"] = copy.deepcopy(self.model["gen"]).to(self.device)
 
-        # self.BS = BS
-        # self.K = K
-        # self.D = D
-        # self.EPOCHS = EPOCHS
         self.log = log
 
         self.dataloader = dataloader
@@ -76,6 +76,9 @@ class Trainer:
     def eval(self):
 
         criterion = LPIPS(net_type="alex", version="0.1")
+        criterion = criterion.to(self.device)
+        # fid = FrechetInceptionDistance(feature=64)
+        n_examples = 10
 
         with torch.no_grad():
             lpipses = []
@@ -90,18 +93,23 @@ class Trainer:
                 ).long()
 
                 zs_trg = torch.randn(
-                    (10, self.cfg["training"]["batch_size"] * 2, 16)
+                    (n_examples, self.cfg["training"]["batch_size"] * 2, 16)
                 ).to(
                     self.device
                 )  # num_samples x batch x  size
 
-                styles = [
-                    self.avg_model["map"](z, y_trg) for z, y_trg in zip(zs_trg, y_trg)
-                ]
-                fakes = [self.avg_model["gen"](real, s) for s in styles]
-                lpips = [criterion(real, fake) for fake in fakes]
+                # нужно в стайл энкодер подавать что-то с первой размерностью в виде батчсайза
 
-                lpipses.extend(lpips)
+                styles = [self.avg_model["map"](z, y_trg) for z in zs_trg]
+                fakes = torch.stack([self.avg_model["gen"](real, s) for s in styles])
+                # self.avg_model["gen"](real, s) (B, 3,H,W)
+                fakes = fakes.permute(1, 0, 2, 3, 4)
+                # self.avg_model["gen"](real, s) (B, 3,H,W, 10)
+                for reference_set in fakes:
+                    for i, im1 in enumerate(reference_set):
+                        for j, im2 in enumerate(reference_set):
+                            if i > j:
+                                lpipses.append(criterion(im1, im2))
             metric = torch.mean(torch.stack(lpipses))
 
             self.logger.add_scalar("lpips_val_latent", metric)
@@ -118,10 +126,11 @@ class Trainer:
             fake = self.model["gen"](real, s)
 
         d_fake = self.model["disc"](fake, y_trg)
+        r_loss = self.r1(d_real, real)
 
-        return adversarial_loss(d_real, 1), adversarial_loss(d_fake, 0)
+        return adversarial_loss(d_real, 1), adversarial_loss(d_fake, 0), r_loss
 
-    def generator_rec_step(self, real, y_src):
+    def rec_step(self, real, y_src):
 
         # generate source images from the same batch by fliping input tensor along batch dim
 
@@ -133,7 +142,9 @@ class Trainer:
 
         adv_loss_g = adversarial_loss(self.model["disc"](fake, y_ref), 1)
 
-        return adv_loss_g  # add div_loss
+        adv_loss_d = adversarial_loss(self.model["disc"](fake.detach(), y_ref), 0)
+
+        return adv_loss_g, adv_loss_d  # add div_loss
 
     def generator_step(self, real, y_src, y_trg):
 
@@ -158,8 +169,7 @@ class Trainer:
         z2 = torch.randn((self.cfg["training"]["batch_size"], 16)).to(self.device)
         s2 = self.model["map"](z2, y_trg)
         fake2 = self.model["gen"](real, s2)
-
-        style_div_l = style_div_loss(fake, fake2)
+        style_div_l = style_div_loss(fake, fake2.detach())
 
         return adv_loss_g, c_loss, s_rec_loss, style_div_l, fake
 
@@ -197,8 +207,10 @@ class Trainer:
 
                 # -----------------------
                 # ------ DISCRIMINATOR --
-                adv_real_d, adv_fake_d = self.discriminator_step(real, y_src, y_trg)
-                loss_d = adv_real_d + adv_fake_d
+                adv_real_d, adv_fake_d, r_loss = self.discriminator_step(
+                    real, y_src, y_trg
+                )
+                loss_d = adv_real_d + adv_fake_d + r_loss
                 loss_d.backward()
                 self.optimizer_d.step()
 
@@ -212,19 +224,24 @@ class Trainer:
                     style_div_l,
                     fake,
                 ) = self.generator_step(real, y_src, y_trg)
-                loss_g = adv_fake_g + cycle_l + style_rec_l - 2 * style_div_l
+
+                loss_g = adv_fake_g + cycle_l + style_rec_l  # - 2 * style_div_l
                 loss_g.backward()
                 self.optimizer_g.step()
                 self.optimizer_s.step()
                 self.optimizer_m.step()
+
                 # -------------------------
                 # ------ GENERATOR REF ----
 
-                loss_g_ref = self.generator_rec_step(real, y_src)
+                loss_g_ref, loss_d_ref = self.rec_step(real, y_src)
 
                 self.optimizer_g.zero_grad()
+                self.optimizer_d.zero_grad()
                 loss_g_ref.backward()
+                loss_d_ref.backward()
                 self.optimizer_g.step()
+                self.optimizer_d.step()
 
                 # Exponential moving average for validation
                 self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
@@ -250,6 +267,7 @@ class Trainer:
                         loss_g.item(),
                         loss_g_ref.item(),
                         loss_d.item(),
+                        loss_d_ref.item(),
                         cycle_l.item(),
                         style_div_l.item(),
                         style_rec_l.item(),
@@ -267,6 +285,7 @@ class Trainer:
         loss_g,
         loss_g_ref,
         loss_d,
+        loss_d_ref,
         cycle_l,
         style_div_l,
         style_rec_l,
@@ -280,6 +299,7 @@ class Trainer:
         self.logger.add_scalar("loss_g", loss_g)
         self.logger.add_scalar("loss_g_ref", loss_g_ref)
         self.logger.add_scalar("loss_d", loss_d)
+        self.logger.add_scalar("loss_d_ref", loss_d_ref)
         self.logger.add_scalar("loss_cycle", cycle_l)
         self.logger.add_scalar("loss_style_div", style_div_l)
         self.logger.add_scalar("loss_style_rex", style_rec_l)

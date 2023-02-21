@@ -1,0 +1,22 @@
+{
+    "wandb_project": "stargan2",
+    "model": {
+        "D": 64
+    },
+    "training": {
+        "batch_size": 16,
+        "epochs": 100,
+        "device": "cuda",
+        "lr": 1e-4,
+        "log_steps": 80,
+        "log": true
+    },
+    "data": {
+        "size": 32,
+        "domains": [
+            "Male"
+        ],
+        "limit": 30000,
+        "val_size": 128
+    }
+}
