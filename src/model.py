@@ -89,16 +89,17 @@ class Discriminator(nn.Module):
             nn.Conv2d(size * 2, size * 2, 2, padding=0),
             nn.LeakyReLU(),
         )
-        self.out = nn.ModuleList([nn.Linear(size * 2, 1) for _ in range(K)])
+        self.out = nn.Linear(size * 2, K)
 
     def forward(self, x, y):
         x = self.in_conv(x)
         x = self.downsampling(x)
         x = self.conv(x)
         x = x.squeeze(3).squeeze(2)
-        out = torch.stack([layer(x) for layer in self.out], dim=1)
+        out = self.out(x)[y]
+        # out = torch.stack([layer(x) for layer in self.out], dim=1)
 
-        out = out[range(x.size(0)), y]
+        # out = out[range(x.size(0)), y]
         return out
 
 
@@ -169,6 +170,7 @@ class StyleEncoder(nn.Module):
             nn.Conv2d(size * 2, size * 2, 2, padding=0),
             nn.LeakyReLU(),
         )
+
         self.out = nn.ModuleList([nn.Linear(size * 2, D) for _ in range(K)])
 
     def forward(self, x, y):
@@ -285,7 +287,7 @@ class AdaIN(nn.Module):
         sigma_projector = sigma_projector.unsqueeze(2).unsqueeze(3)
 
         x = F.instance_norm(x)
-        return x * sigma_projector + mu_style
+        return x * (sigma_projector) + mu_style
 
 
 def adversarial_loss(d_out: torch.Tensor, label: int):
