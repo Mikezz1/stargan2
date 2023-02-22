@@ -298,7 +298,11 @@ def adversarial_loss(d_out: torch.Tensor, label: int):
     Returns:
         torch.Tensor: adversarial loss
     """
-    labels = torch.ones_like(d_out) if label == 1 else torch.zeros_like(d_out)
+    labels = (
+        (torch.ones_like(d_out) - 0.1)
+        if label == 1
+        else (torch.zeros_like(d_out) + 0.1)
+    )
     return F.binary_cross_entropy_with_logits(d_out, labels)
 
 

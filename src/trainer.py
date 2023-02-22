@@ -243,7 +243,10 @@ class Trainer:
                 ) = self.generator_step(real, y_src, y_trg)
 
                 loss_g = (
-                    adv_fake_g + cycle_l + style_rec_l - style_div_l * (0.9995**step)
+                    adv_fake_g
+                    + cycle_l
+                    + 2 * style_rec_l
+                    # - style_div_l * (0.999**step)
                 )
                 loss_g.backward()
                 self.optimizer_g.step()
@@ -258,7 +261,9 @@ class Trainer:
                 self.optimizer_g.zero_grad()
                 self.optimizer_d.zero_grad()
                 loss_g_ref.backward()
+
                 loss_d_ref.backward()
+
                 self.optimizer_g.step()
                 self.optimizer_d.step()
 
