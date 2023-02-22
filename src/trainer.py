@@ -126,10 +126,15 @@ class Trainer:
         d_fake = self.model["disc"](fake, y_trg)
         r_loss = self.r1(d_real, real)
 
+        real_loss = F.binary_cross_entropy_with_logits(
+            d_real, torch.ones_like(y_trg) * 0.9
+        )
+        fake_loss = F.binary_cross_entropy_with_logits(
+            d_fake, torch.zeros_like(y_trg) + 0.1
+        )
+
         return (
-            (
-                torch.log(torch.sigmoid(d_fake)) - torch.log(torch.sigmoid(d_real))
-            ).mean(),
+            real_loss + fake_loss,
             r_loss,
         )  # adversarial_loss(d_real, 1), adversarial_loss(d_fake, 0), r_loss
 
@@ -164,9 +169,9 @@ class Trainer:
         z = torch.randn((self.cfg["training"]["batch_size"], 16)).to(self.device)
         s = self.model["map"](z, y_trg)
         fake = self.model["gen"](real, s)
-        adv_loss_g = -torch.log(
-            torch.sigmoid(self.model["disc"](fake, y_trg))
-        ).mean()  # adversarial_loss(self.model["disc"](fake, y_trg), 1)
+        adv_loss_g = F.binary_cross_entropy_with_logits(
+            self.model["disc"](fake, y_trg), torch.ones_like(y_trg) * 0.9
+        )
 
         # ------------------------------------
         # --------- Cycle Loss
@@ -185,7 +190,7 @@ class Trainer:
         style_div_l = style_div_loss(fake, fake2.detach())
 
         return (
-            torch.mean(adv_loss_g),
+            adv_loss_g,
             c_loss,
             s_rec_loss,
             style_div_l,

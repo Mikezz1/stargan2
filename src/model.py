@@ -96,7 +96,8 @@ class Discriminator(nn.Module):
         x = self.downsampling(x)
         x = self.conv(x)
         x = x.squeeze(3).squeeze(2)
-        out = self.out(x)[y]
+        out = self.out(x)
+        out = out[range(out.size(0)), y]
         # out = torch.stack([layer(x) for layer in self.out], dim=1)
 
         # out = out[range(x.size(0)), y]
