@@ -127,7 +127,7 @@ class MappingNetwork(nn.Module):
                     self.get_fc_block(128, 128),
                     self.get_fc_block(128, D, activation=False),
                 )
-                for j in range(K)
+                for _ in range(K)
             ]
         )
 

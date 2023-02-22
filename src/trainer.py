@@ -5,6 +5,7 @@ from src.model import *
 from torch.optim import AdamW
 from src.logger import WanDBWriter
 import copy
+import os
 from lpips_pytorch import LPIPS
 
 # from torchmetrics.image.fid import FrechetInceptionDistance
@@ -127,10 +128,10 @@ class Trainer:
         r_loss = self.r1(d_real, real)
 
         real_loss = F.binary_cross_entropy_with_logits(
-            d_real, torch.ones_like(y_trg) * 0.9
+            d_real, torch.ones_like(y_trg) * 0.8
         )
         fake_loss = F.binary_cross_entropy_with_logits(
-            d_fake, torch.zeros_like(y_trg) + 0.1
+            d_fake, torch.zeros_like(y_trg) + 0.2
         )
 
         return (
@@ -170,7 +171,7 @@ class Trainer:
         s = self.model["map"](z, y_trg)
         fake = self.model["gen"](real, s)
         adv_loss_g = F.binary_cross_entropy_with_logits(
-            self.model["disc"](fake, y_trg), torch.ones_like(y_trg) * 0.9
+            self.model["disc"](fake, y_trg), torch.ones_like(y_trg) * 0.8
         )
 
         # ------------------------------------
@@ -260,7 +261,7 @@ class Trainer:
                 ) = self.generator_step(real, y_src, y_trg)
 
                 loss_g = (
-                    adv_fake_g + cycle_l + style_rec_l - style_div_l * (0.9999**step)
+                    adv_fake_g + cycle_l + style_rec_l  # - style_div_l * (0.9999**step)
                 )
                 loss_g.backward()
                 self.optimizer_g.step()
@@ -282,11 +283,11 @@ class Trainer:
                 # self.optimizer_d.step()
 
                 # Exponential moving average for validation
-                self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
-                self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
-                self.ema_weight_averaging(
-                    self.model["gen"], self.avg_model["gen"], 0.999
-                )
+                # self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
+                # self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
+                # self.ema_weight_averaging(
+                #     self.model["gen"], self.avg_model["gen"], 0.999
+                # )
 
                 if (self.log) and (step % self.cfg["training"]["log_steps"] == 0):
                     self.eval()
@@ -312,6 +313,23 @@ class Trainer:
                         gnorms,
                     )
                     self.log_images(fake, fake_rec, real)
+                    self.generate_samples_from_reference()
+
+    def generate_samples_from_reference(self):
+        refs = next(iter(self.val_dataloader))
+        imgs = refs[0].to(self.device)
+        y = refs[1]["attributes"].to(self.device)
+        male_y = y[y == 1][0]
+        male_img = imgs[y == 1][0].unsqueeze(0)
+        female_y = y[y == 0][0]
+        female_img = imgs[y == 0][0].unsqueeze(0)
+
+        s_ref = self.model["se"](male_img, [1])
+        fake = self.model["gen"](female_img, s_ref)
+
+        self.logger.add_image("male_to_female", fake)
+        self.logger.add_image("src_male", male_img)
+        self.logger.add_image("ref_female", female_img)
 
     def log_scalars(
         self,
