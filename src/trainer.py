@@ -62,7 +62,10 @@ class Trainer:
         )
 
         self.logger = WanDBWriter(self.cfg) if self.log else None
-        print(self.model["map"])
+        # self.logger.add_text("arch_map", self.model["map"].__repr__())
+        # self.logger.add_text("arch_d", self.model["disc"].__repr__())
+        # self.logger.add_text("arch_g", self.model["gen"].__repr__())
+        # self.logger.add_text("arch_se", self.model["se"].__repr__())
 
         scheduler_g = None
         scheduler_d = None
@@ -131,10 +134,10 @@ class Trainer:
         r_loss = self.r1(d_real, real)
 
         real_loss = F.binary_cross_entropy_with_logits(
-            d_real, torch.ones_like(y_trg) * 0.8
+            d_real, torch.ones_like(y_trg) - 0.1
         )
         fake_loss = F.binary_cross_entropy_with_logits(
-            d_fake, torch.zeros_like(y_trg) + 0.2
+            d_fake, torch.zeros_like(y_trg) + 0.1
         )
 
         # print("-" * 10)
@@ -171,17 +174,13 @@ class Trainer:
             self.optimizer_m.state_dict(), self.cfg["data"]["checkpoint"] + "opt_m.pth"
         )
 
-    def rec_step(self, real, y_src):
+    def rec_step(self, real, y_src, batch_ref):
         real = real.requires_grad_()
 
-        # generate source images from the same batch by fliping input tensor along batch dim
+        real_ref = batch_ref[0].to(self.device)
+        y_ref = batch_ref[1]["attributes"].to(self.device)
 
-        # batch_ref = next(iter(self.ref_dataloader))
-        # real = batch_ref[0].to(self.device)
-        # y_src = batch_ref[1]["attributes"].to(self.device)
-
-        real_ref = real.flip(dims=(0,))
-        y_ref = y_src.flip(dims=(0,))
+        real_ref = real_ref.requires_grad_()
 
         s_ref = self.model["se"](real_ref, y_ref)
         fake = self.model["gen"](real, s_ref)
@@ -210,7 +209,7 @@ class Trainer:
         s = self.model["map"](z, y_trg)
         fake = self.model["gen"](real, s)
         adv_loss_g = F.binary_cross_entropy_with_logits(
-            self.model["disc"](fake, y_trg), torch.ones_like(y_trg) * 0.8
+            self.model["disc"](fake, y_trg), torch.ones_like(y_trg) * 0.9
         )
 
         # ------------------------------------
@@ -246,7 +245,7 @@ class Trainer:
             block.to(self.device)
 
         for epoch in range(self.cfg["training"]["epochs"]):
-            for batch in tqdm(self.dataloader):
+            for batch, batch_ref in tqdm(zip(self.dataloader, self.ref_dataloader)):
                 # batch.to(self.device)
                 real = batch[0].to(self.device)
                 y_src = batch[1]["attributes"].to(self.device)
@@ -307,7 +306,7 @@ class Trainer:
                 # -------------------------
                 # ------ GENERATOR REF ----
 
-                loss_g_ref, loss_d_ref = self.rec_step(real, y_src)
+                loss_g_ref, loss_d_ref = self.rec_step(real, y_src, batch_ref)
 
                 self.optimizer_g.zero_grad()
                 self.optimizer_d.zero_grad()
