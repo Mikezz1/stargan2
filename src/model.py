@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-import math
 
 
 class DummyResampler(nn.Module):
@@ -14,7 +13,6 @@ class DummyResampler(nn.Module):
 
 class Generator(nn.Module):
     def __init__(self, size, D):
-
         super().__init__()
         self.in_conv = nn.Conv2d(
             in_channels=3, out_channels=size // 2, kernel_size=1, padding=0
@@ -22,42 +20,33 @@ class Generator(nn.Module):
         self.out_conv = nn.Conv2d(size // 2, 3, 1, padding=0)
         self.downsampling = nn.Sequential(
             # 64x64
-            ResBlk(size // 2, size, normalize=True, downsample=True),
+            nn.AvgPool2d(2),
+            ResBlock(size // 2, size, nn.InstanceNorm2d(size)),
             # 32x32
-            ResBlk(size, size * 2, normalize=True, downsample=True),
+            nn.AvgPool2d(2),
+            ResBlock(size, size * 2, nn.InstanceNorm2d(size * 2)),
             # 16x16
-            ResBlk(size * 2, size * 2, normalize=True, downsample=True),
-            # # # 8x8
-            # ResBlk(size * 2, size * 2, normalize=True, downsample=True),
-            # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(size * 8)),
-            # nn.AvgPool2d(2),
-            # # 4x4
-            # ResBlock(size * 8, size * 8, nn.InstanceNorm2d(512)),
+            nn.AvgPool2d(2),
+            ResBlock(size * 2, size * 2, nn.InstanceNorm2d(size * 2)),
+            # # 8x8
         )
         self.intermediate = nn.Sequential(
-            ResBlk(size * 2, size * 2, normalize=True, downsample=False),
-            ResBlk(size * 2, size * 2, normalize=True, downsample=False),
-            AdainResBlk(size * 2, size * 2, style_dim=D, upsample=False),
-            AdainResBlk(size * 2, size * 2, style_dim=D, upsample=False),
+            ResBlock(size * 2, size * 2, nn.InstanceNorm2d(size * 2)),
+            ResBlock(size * 2, size * 2, nn.InstanceNorm2d(size * 2)),
+            AdaINResBlock(size * 2, size * 2, D),
+            AdaINResBlock(size * 2, size * 2, D),
         )
 
         self.upsampling = nn.ModuleList(
             [
-                # 4x4
-                # nn.Upsample(scale_factor=2),
-                # AdaINResBlock(size * 8, size * 8, D),
-                # # 8x8
-                # nn.Upsample(scale_factor=2),
-                # AdaINResBlock(size * 8, size * 4, D),
-                # nn.Upsample(scale_factor=2),
-                AdainResBlk(size * 2, size * 2, style_dim=D, upsample=True),
-                AdainResBlk(size * 2, size, style_dim=D, upsample=True),
-                AdainResBlk(size, size // 2, style_dim=D, upsample=True),
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(size * 2, size, D),
                 # 16x16
-                # nn.Upsample(scale_factor=2),
-                # AdainResBlk(size, size, style_dim=D, upsample=True),
-                # # 32x32
-                # AdainResBlk(size, size // 2, style_dim=D, upsample=True),
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(size, size, D),
+                # 32x32
+                nn.Upsample(scale_factor=2),
+                AdaINResBlock(size, size // 2, D),
                 # 64x64
             ]
         )
@@ -66,9 +55,9 @@ class Generator(nn.Module):
         x = self.in_conv(x)
         x = self.downsampling(x)
         for layer in self.intermediate:
-            x = layer(x, s) if isinstance(layer, AdainResBlk) else layer(x)
+            x = layer(x, s)
         for layer in self.upsampling:
-            x = layer(x, s) if isinstance(layer, AdainResBlk) else layer(x)
+            x = layer(x, s) if isinstance(layer, AdaINResBlock) else layer(x)
         return self.out_conv(x)
 
 
@@ -77,30 +66,32 @@ class Discriminator(nn.Module):
         super().__init__()
         self.in_conv = nn.Conv2d(3, size // 2, 3, padding=1)
         self.downsampling = nn.Sequential(
-            ResBlk(size // 2, size, normalize=False, downsample=True),
-            ResBlk(size, size * 2, normalize=False, downsample=True),
-            ResBlk(size * 2, size * 2, normalize=False, downsample=True),
-            ResBlk(size * 2, size * 2, normalize=False, downsample=True),
-            ResBlk(size * 2, size * 2, normalize=False, downsample=False),
+            ResBlock(size // 2, size, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size, size * 2, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size * 2, size * 4, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size * 4, size * 4, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size * 4, size * 4, act=nn.LeakyReLU()),
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 2, size * 2, 4, padding=0),
+            nn.Conv2d(size * 4, size * 2, 4, padding=0),
             nn.LeakyReLU(),
         )
-        self.out = nn.Linear(size * 2, K)
+        self.out = nn.ModuleList([nn.Linear(size * 2, 1) for _ in range(K)])
 
     def forward(self, x, y):
         x = self.in_conv(x)
         x = self.downsampling(x)
         x = self.conv(x)
         x = x.squeeze(3).squeeze(2)
-        out = self.out(x)
-        out = out[range(out.size(0)), y]
-        # out = torch.stack([layer(x) for layer in self.out], dim=1)
+        out = torch.stack([layer(x) for layer in self.out], dim=1)
 
-        # out = out[range(x.size(0)), y]
-        return out
+        out = out[range(x.size(0)), y]
+        return out.squeeze()
 
 
 class MappingNetwork(nn.Module):
@@ -126,7 +117,7 @@ class MappingNetwork(nn.Module):
                     self.get_fc_block(128, 128),
                     self.get_fc_block(128, D, activation=False),
                 )
-                for _ in range(K)
+                for j in range(K)
             ]
         )
 
@@ -155,18 +146,21 @@ class StyleEncoder(nn.Module):
         super().__init__()
         self.in_conv = nn.Conv2d(3, size // 2, 3, padding=1)
         self.downsampling = nn.Sequential(
-            ResBlk(size // 2, size, normalize=False, downsample=True),
-            ResBlk(size, size * 2, normalize=False, downsample=True),
-            ResBlk(size * 2, size * 2, normalize=False, downsample=True),
-            ResBlk(size * 2, size * 2, normalize=False, downsample=True),
-            ResBlk(size * 2, size * 2, normalize=False, downsample=False),
+            ResBlock(size // 2, size, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size, size * 2, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size * 2, size * 4, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size * 4, size * 4, act=nn.LeakyReLU()),
+            nn.AvgPool2d(2),
+            ResBlock(size * 4, size * 4, act=nn.LeakyReLU()),
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 2, size * 2, 4, padding=0),
+            nn.Conv2d(size * 4, size * 2, 4, padding=0),
             nn.LeakyReLU(),
         )
-
         self.out = nn.ModuleList([nn.Linear(size * 2, D) for _ in range(K)])
 
     def forward(self, x, y):
@@ -183,7 +177,6 @@ class ResBlock(nn.Module):
     """
     Building block for Generator, Discriminator and Style Encoder.
     Should specify either pooling or upsampling
-
     Args:
         norm (nn.Module): Instance norm or Adaptive Instance norm
         act (nn.Module): Activation function
@@ -224,55 +217,9 @@ class ResBlock(nn.Module):
         return x
 
 
-class ResBlk(nn.Module):
-    def __init__(
-        self, dim_in, dim_out, act=nn.LeakyReLU(0.2), normalize=False, downsample=False
-    ):
-        super().__init__()
-        self.actv = act
-        self.normalize = normalize
-        self.downsample = downsample
-        self.learned_sc = dim_in != dim_out
-        self._build_weights(dim_in, dim_out)
-
-    def _build_weights(self, dim_in, dim_out):
-        self.conv1 = nn.Conv2d(dim_in, dim_in, 3, 1, 1)
-        self.conv2 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
-        if self.normalize:
-            self.norm1 = nn.InstanceNorm2d(dim_in, affine=True)
-            self.norm2 = nn.InstanceNorm2d(dim_in, affine=True)
-        if self.learned_sc:
-            self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
-
-    def _shortcut(self, x):
-        if self.learned_sc:
-            x = self.conv1x1(x)
-        if self.downsample:
-            x = F.avg_pool2d(x, 2)
-        return x
-
-    def _residual(self, x):
-        if self.normalize:
-            x = self.norm1(x)
-        x = self.actv(x)
-        x = self.conv1(x)
-        if self.downsample:
-            x = F.avg_pool2d(x, 2)
-        if self.normalize:
-            x = self.norm2(x)
-        x = self.actv(x)
-        x = self.conv2(x)
-        return x
-
-    def forward(self, x):
-        x = self._shortcut(x) + self._residual(x)
-        return x / math.sqrt(2)  # unit variance
-
-
 class AdaINResBlock(nn.Module):
     """
     Building block for Generator
-
     Args:
         norm (nn.Module): Instance norm or Adaptive Instance norm
         act (nn.Module): Activation function
@@ -311,96 +258,31 @@ class AdaINResBlock(nn.Module):
         return x
 
 
-# class AdaIN(nn.Module):
-#     """Like in style gan"""
-
-#     def __init__(self, n_fmaps, style_dim):
-#         super().__init__()
-#         self.mu_projector = nn.Linear(style_dim, n_fmaps)
-#         self.sigma_projector = nn.Linear(style_dim, n_fmaps)
-
-#     def forward(self, x, s):
-
-#         mu_style = self.mu_projector(s)
-#         sigma_projector = self.sigma_projector(s)
-#         # x ~ (B, C, H, W), mu/std ~ (B, C)
-#         mu_style = mu_style.unsqueeze(2).unsqueeze(3)
-#         sigma_projector = sigma_projector.unsqueeze(2).unsqueeze(3)
-
-#         x = F.instance_norm(x)
-#         return x * (sigma_projector) + mu_style
-
-
-class AdainResBlk(nn.Module):
-    def __init__(
-        self,
-        dim_in,
-        dim_out,
-        style_dim=64,
-        w_hpf=0,
-        actv=nn.LeakyReLU(0.2),
-        upsample=False,
-    ):
-        super().__init__()
-        self.w_hpf = w_hpf
-        self.actv = actv
-        self.upsample = upsample
-        self.learned_sc = dim_in != dim_out
-        self._build_weights(dim_in, dim_out, style_dim)
-
-    def _build_weights(self, dim_in, dim_out, style_dim=64):
-        self.conv1 = nn.Conv2d(dim_in, dim_out, 3, 1, 1)
-        self.conv2 = nn.Conv2d(dim_out, dim_out, 3, 1, 1)
-        self.norm1 = AdaIN(dim_in, style_dim)
-        self.norm2 = AdaIN(dim_out, style_dim)
-        if self.learned_sc:
-            self.conv1x1 = nn.Conv2d(dim_in, dim_out, 1, 1, 0, bias=False)
-
-    def _shortcut(self, x):
-        if self.upsample:
-            x = F.interpolate(x, scale_factor=2, mode="nearest")
-        if self.learned_sc:
-            x = self.conv1x1(x)
-        return x
-
-    def _residual(self, x, s):
-        x = self.norm1(x, s)
-        x = self.actv(x)
-        if self.upsample:
-            x = F.interpolate(x, scale_factor=2, mode="nearest")
-        x = self.conv1(x)
-        x = self.norm2(x, s)
-        x = self.actv(x)
-        x = self.conv2(x)
-        return x
-
-    def forward(self, x, s):
-        out = self._residual(x, s)
-        if self.w_hpf == 0:
-            out = (out + self._shortcut(x)) / math.sqrt(2)
-        return out
-
-
 class AdaIN(nn.Module):
-    def __init__(self, num_features, style_dim):
+    """Like in style gan"""
+
+    def __init__(self, n_fmaps, style_dim):
         super().__init__()
-        self.norm = nn.InstanceNorm2d(num_features, affine=False)
-        self.fc = nn.Linear(style_dim, num_features * 2)
+        self.mu_projector = nn.Linear(style_dim, n_fmaps)
+        self.sigma_projector = nn.Linear(style_dim, n_fmaps)
 
     def forward(self, x, s):
-        h = self.fc(s)
-        h = h.view(h.size(0), h.size(1), 1, 1)
-        gamma, beta = torch.chunk(h, chunks=2, dim=1)
-        return (1 + gamma) * self.norm(x) + beta
+
+        mu_style = self.mu_projector(s)
+        sigma_projector = self.sigma_projector(s)
+        # x ~ (B, C, H, W), mu/std ~ (B, C)
+        mu_style = mu_style.unsqueeze(2).unsqueeze(3)
+        sigma_projector = sigma_projector.unsqueeze(2).unsqueeze(3)
+
+        x = F.instance_norm(x)
+        return x * sigma_projector + mu_style
 
 
 def adversarial_loss(d_out: torch.Tensor, label: int):
     """
-
     Args:
         d_out (torch.Tensor): output of disc on real image given real domain
         label (int): output of disc on fake image wihout implicit domain
-
     Returns:
         torch.Tensor: adversarial loss
     """
@@ -414,11 +296,9 @@ def adversarial_loss(d_out: torch.Tensor, label: int):
 
 def style_rec_loss(s, s_rec):
     """
-
     Args:
         s (torch.Tensor): style code from F (mapping function)
         s_rec (torch.Tensor): style code from style encoder given generated image
-
     Returns:
         torch.Tensor: loss
     """
@@ -427,11 +307,9 @@ def style_rec_loss(s, s_rec):
 
 def style_div_loss(fake_s1, fake_s2):
     """
-
     Args:
         fake_s1 (torch.Tensor): fake image given style code 1
         fake_s2 (torch.Tensor): fake image given style code 2
-
     Returns:
         torch.Tensor: -loss
     """
@@ -440,11 +318,9 @@ def style_div_loss(fake_s1, fake_s2):
 
 def cycle_loss(true, true_reconstructed):
     """
-
     Args:
         true (torch.Tensor): source image
         true_reconstructed (torch.Tensor): reversed fake image G(G(x, s), s^hat)
-
     Returns:
         torch.Tensor: loss
     """

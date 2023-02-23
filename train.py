@@ -78,6 +78,14 @@ if __name__ == "__main__":
         shuffle=True,
         drop_last=True,
     )
+    reference_dataloader = torch.utils.data.DataLoader(
+        train_ds,
+        batch_size=config["training"]["batch_size"],
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        shuffle=True,
+        drop_last=True,
+    )
     val_dataloader = torch.utils.data.DataLoader(
         val_ds,
         batch_size=config["training"]["batch_size"] * 2,
@@ -91,6 +99,7 @@ if __name__ == "__main__":
         config=config,
         dataloader=train_dataloader,
         val_dataloader=val_dataloader,
+        reference_dataloader=reference_dataloader,
         log=config["training"]["log"],
     )
 

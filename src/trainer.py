@@ -13,7 +13,7 @@ from sklearn.metrics import roc_auc_score
 
 
 class Trainer:
-    def __init__(self, dataloader, val_dataloader, config, log):
+    def __init__(self, dataloader, val_dataloader, reference_dataloader, config, log):
         # self.config = config
         self.cfg = config
         self.device = self.cfg["training"]["device"]
@@ -46,6 +46,7 @@ class Trainer:
         self.log = log
 
         self.dataloader = dataloader
+        self.ref_dataloader = reference_dataloader
         self.val_dataloader = val_dataloader
         self.optimizer_g = AdamW(
             self.model["gen"].parameters(), lr=self.cfg["training"]["lr"]
@@ -175,6 +176,10 @@ class Trainer:
 
         # generate source images from the same batch by fliping input tensor along batch dim
 
+        # batch_ref = next(iter(self.ref_dataloader))
+        # real = batch_ref[0].to(self.device)
+        # y_src = batch_ref[1]["attributes"].to(self.device)
+
         real_ref = real.flip(dims=(0,))
         y_ref = y_src.flip(dims=(0,))
 
@@ -182,6 +187,9 @@ class Trainer:
         fake = self.model["gen"](real, s_ref)
 
         adv_loss_g = adversarial_loss(self.model["disc"](fake, y_ref), 1)
+        fake_reversed = self.model["gen"](fake, s_ref)
+        cycle_loss_g = cycle_loss(real_ref, fake_reversed)
+        style_loss_g = style_rec_loss(s_ref, self.model["se"](fake, y_ref))
 
         d_fake = self.model["disc"](fake.detach(), y_ref)
         d_real = self.model["disc"](real_ref, y_ref)
@@ -189,7 +197,7 @@ class Trainer:
         adv_loss_d = adversarial_loss(d_fake, 0) + adversarial_loss(d_real, 1) + r_loss
 
         return (
-            adv_loss_g,
+            adv_loss_g + cycle_loss_g + style_loss_g,
             adv_loss_d,
         )
 
@@ -220,9 +228,6 @@ class Trainer:
         s2 = self.model["map"](z2, y_trg)
         fake2 = self.model["gen"](real, s2)
         style_div_l = style_div_loss(fake, fake2.detach())
-        # print("-" * 10)
-        # print(torch.abs(z - z2).mean().item())
-        # print(torch.abs(s - s2).mean().item())
 
         return (
             adv_loss_g,
@@ -272,8 +277,6 @@ class Trainer:
                         - y_src
                     ).long()
 
-                # assert all(y_trg != y_src)
-
                 # -----------------------
                 # ------ DISCRIMINATOR --
                 loss_d, r_loss = self.discriminator_step(real, y_src, y_trg)
@@ -304,16 +307,16 @@ class Trainer:
                 # -------------------------
                 # ------ GENERATOR REF ----
 
-                # loss_g_ref, loss_d_ref = self.rec_step(real, y_src)
+                loss_g_ref, loss_d_ref = self.rec_step(real, y_src)
 
-                # self.optimizer_g.zero_grad()
-                # self.optimizer_d.zero_grad()
-                # loss_g_ref.backward()
+                self.optimizer_g.zero_grad()
+                self.optimizer_d.zero_grad()
 
-                # loss_d_ref.backward()
+                loss_g_ref.backward()
+                loss_d_ref.backward()
 
-                # self.optimizer_g.step()
-                # self.optimizer_d.step()
+                self.optimizer_g.step()
+                self.optimizer_d.step()
 
                 # Exponential moving average for validation
                 # self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
@@ -337,9 +340,9 @@ class Trainer:
                         adv_fake_g.item(),
                         # adv_real_d.item(),
                         loss_g.item(),
-                        # loss_g_ref.item(),
+                        loss_g_ref.item(),
                         loss_d.item(),
-                        # loss_d_ref.item(),
+                        loss_d_ref.item(),
                         cycle_l.item(),
                         style_div_l.item(),
                         style_rec_l.item(),
@@ -365,26 +368,28 @@ class Trainer:
     #     self.logger.add_text("all_labels", f"{y}")
 
     def generate_samples_from_reference(self):
-        refs = next(iter(self.val_dataloader))
-        imgs = refs[0].to(self.device)
-        y = refs[1]["attributes"].to(self.device)
-        # male_y = y[y == 1][0]
-        male_img = imgs[y == 1][0].unsqueeze(0)
-        # female_y = y[y == 0][0]
-        female_img = imgs[y == 0][0].unsqueeze(0)
+        with torch.no_grad():
 
-        s_ref = self.model["se"](male_img, [1])
-        fake = self.model["gen"](female_img, s_ref)
+            refs = next(iter(self.val_dataloader))
+            imgs = refs[0].to(self.device)
+            y = refs[1]["attributes"].to(self.device)
+            # male_y = y[y == 1][0]
+            male_img = imgs[y == 1][0].unsqueeze(0)
+            # female_y = y[y == 0][0]
+            female_img = imgs[y == 0][0].unsqueeze(0)
 
-        z1 = torch.randn((1, 16)).to(self.device)
-        z2 = torch.randn((1, 16)).to(self.device)
-        s1 = self.model["map"](z1, [0])
-        s2 = self.model["map"](z2, [0])
-        s3 = self.model["map"](z1, [1])
+            s_ref = self.model["se"](male_img, [1])
+            fake = self.model["gen"](female_img, s_ref)
 
-        fake_female = self.model["gen"](male_img, s1)
-        fake_female2 = self.model["gen"](male_img, s2)
-        fake_male = self.model["gen"](male_img, s3)
+            z1 = torch.randn((1, 16)).to(self.device)
+            z2 = torch.randn((1, 16)).to(self.device)
+            s1 = self.model["map"](z1, [0])
+            s2 = self.model["map"](z2, [0])
+            s3 = self.model["map"](z1, [1])
+
+            fake_female = self.model["gen"](male_img, s1)
+            fake_female2 = self.model["gen"](male_img, s2)
+            fake_male = self.model["gen"](male_img, s3)
 
         # print(
         #     torch.abs(s1 - s2).mean().item(),
@@ -412,9 +417,9 @@ class Trainer:
         adv_fake_g,
         # adv_real_d,
         loss_g,
-        # loss_g_ref,
+        loss_g_ref,
         loss_d,
-        # loss_d_ref,
+        loss_d_ref,
         cycle_l,
         style_div_l,
         style_rec_l,
@@ -426,9 +431,9 @@ class Trainer:
         self.logger.add_scalar("adv_fake_g", adv_fake_g)
         # self.logger.add_scalar("adv_real_d", adv_real_d)
         self.logger.add_scalar("loss_g", loss_g)
-        # self.logger.add_scalar("loss_g_ref", loss_g_ref)
+        self.logger.add_scalar("loss_g_ref", loss_g_ref)
         self.logger.add_scalar("loss_d", loss_d)
-        # self.logger.add_scalar("loss_d_ref", loss_d_ref)
+        self.logger.add_scalar("loss_d_ref", loss_d_ref)
         self.logger.add_scalar("loss_cycle", cycle_l)
         self.logger.add_scalar("loss_style_div", style_div_l)
         self.logger.add_scalar("loss_style_rex", style_rec_l)
