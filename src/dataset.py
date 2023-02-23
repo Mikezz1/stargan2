@@ -19,7 +19,7 @@ class CelebADataset(Dataset):
         self,
         root_dir=os.path.join(CUR_DIR, "../../data/celeba"),
         transform=None,
-        domains=["Male", "Blond_Hair"],
+        domains=["Male"],
         limit=None,
     ):
         """
@@ -73,10 +73,11 @@ class CelebADataset(Dataset):
                     self.filenames.append(filename)
                     # delete contraint on num of annotations
                     annotations = []
-                    for idx in domain_indices:
-                        annotations.append(int(values[idx]))
-                    annotations = self._transform_targets(tuple(annotations), domains)
-                    self.annotations.append(annotations)
+                    # print(domain_indices)
+                    # for idx in domain_indices:
+                    #     annotations.append(int(values[idx]))
+                    # annotations = self._transform_targets(tuple(annotations), domains)
+                    self.annotations.append(max(0, int(values[1 + domain_indices[0]])))
 
         self.annotations = np.array(self.annotations)
 

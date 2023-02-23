@@ -7,6 +7,7 @@ from src.logger import WanDBWriter
 import copy
 import os
 from lpips_pytorch import LPIPS
+from sklearn.metrics import roc_auc_score
 
 # from torchmetrics.image.fid import FrechetInceptionDistance
 
@@ -60,6 +61,7 @@ class Trainer:
         )
 
         self.logger = WanDBWriter(self.cfg) if self.log else None
+        print(self.model["map"])
 
         scheduler_g = None
         scheduler_d = None
@@ -134,10 +136,39 @@ class Trainer:
             d_fake, torch.zeros_like(y_trg) + 0.2
         )
 
+        # print("-" * 10)
+        # d_0 = d_fake[y_trg == 0].tolist() + d_real[y_src == 0].tolist()
+        # d_1 = d_fake[y_trg == 1].tolist() + d_real[y_src == 1].tolist()
+        # l_0 = [0] * len(d_fake[y_trg == 0]) + [1] * len(d_real[y_src == 0])
+        # l_1 = [0] * len(d_fake[y_trg == 1]) + [1] * len(d_real[y_src == 1])
+
+        # print(
+        #     roc_auc_score(l_0, d_0),
+        #     roc_auc_score(l_1, d_1),
+        # )
+
         return (
             real_loss + fake_loss,
             r_loss,
         )  # adversarial_loss(d_real, 1), adversarial_loss(d_fake, 0), r_loss
+
+    def checkpoint(self):
+        for name, model in self.model.items():
+            torch.save(
+                model.state_dict(), self.cfg["data"]["checkpoint"] + f"{name}.pth"
+            )
+        torch.save(
+            self.optimizer_g.state_dict(), self.cfg["data"]["checkpoint"] + "opt_g.pth"
+        )
+        torch.save(
+            self.optimizer_d.state_dict(), self.cfg["data"]["checkpoint"] + "opt_d.pth"
+        )
+        torch.save(
+            self.optimizer_s.state_dict(), self.cfg["data"]["checkpoint"] + "opt_s.pth"
+        )
+        torch.save(
+            self.optimizer_m.state_dict(), self.cfg["data"]["checkpoint"] + "opt_m.pth"
+        )
 
     def rec_step(self, real, y_src):
         real = real.requires_grad_()
@@ -160,7 +191,7 @@ class Trainer:
         return (
             adv_loss_g,
             adv_loss_d,
-        )  # add div_loss
+        )
 
     def generator_step(self, real, y_src, y_trg):
         real = real.requires_grad_()
@@ -176,7 +207,7 @@ class Trainer:
 
         # ------------------------------------
         # --------- Cycle Loss
-        fake_reversed = self.model["gen"](fake, self.model["se"](fake, y_src))
+        fake_reversed = self.model["gen"](fake, self.model["se"](real, y_src))
         c_loss = cycle_loss(fake_reversed, real)
 
         # ------------------------------------
@@ -189,6 +220,9 @@ class Trainer:
         s2 = self.model["map"](z2, y_trg)
         fake2 = self.model["gen"](real, s2)
         style_div_l = style_div_loss(fake, fake2.detach())
+        # print("-" * 10)
+        # print(torch.abs(z - z2).mean().item())
+        # print(torch.abs(s - s2).mean().item())
 
         return (
             adv_loss_g,
@@ -202,6 +236,9 @@ class Trainer:
     def train(self):
 
         step = 0
+        for block in self.model.values():
+            block.train()
+            block.to(self.device)
 
         for epoch in range(self.cfg["training"]["epochs"]):
             for batch in tqdm(self.dataloader):
@@ -212,10 +249,6 @@ class Trainer:
                 step += 1
 
                 self.logger.set_step(step) if self.log else None
-
-                for block in self.model.values():
-                    block.train()
-                    block.to(self.device)
 
                 self.optimizer_g.zero_grad()
                 self.optimizer_d.zero_grad()
@@ -261,7 +294,7 @@ class Trainer:
                 ) = self.generator_step(real, y_src, y_trg)
 
                 loss_g = (
-                    adv_fake_g + cycle_l + style_rec_l  # - style_div_l * (0.9999**step)
+                    adv_fake_g + style_rec_l + cycle_l - style_div_l * (0.9999**step)
                 )
                 loss_g.backward()
                 self.optimizer_g.step()
@@ -314,22 +347,62 @@ class Trainer:
                     )
                     self.log_images(fake, fake_rec, real)
                     self.generate_samples_from_reference()
+                    # self.test_dls()
+            self.checkpoint()
+
+    # def test_dls(self):
+    #     refs = next(iter(self.val_dataloader))
+
+    #     imgs = refs[0].to(self.device)
+    #     y = refs[1]["attributes"].to(self.device)
+    #     male_y = y[y == 1]
+    #     male_img = imgs[y == 1]
+    #     female_y = y[y == 0]
+    #     female_img = imgs[y == 0]
+    #     self.logger.add_image("images_label_0", female_img)
+    #     self.logger.add_image("images_label_1", male_img)
+    #     self.logger.add_image("all_images_label_1", imgs)
+    #     self.logger.add_text("all_labels", f"{y}")
 
     def generate_samples_from_reference(self):
         refs = next(iter(self.val_dataloader))
         imgs = refs[0].to(self.device)
         y = refs[1]["attributes"].to(self.device)
-        male_y = y[y == 1][0]
+        # male_y = y[y == 1][0]
         male_img = imgs[y == 1][0].unsqueeze(0)
-        female_y = y[y == 0][0]
+        # female_y = y[y == 0][0]
         female_img = imgs[y == 0][0].unsqueeze(0)
 
         s_ref = self.model["se"](male_img, [1])
         fake = self.model["gen"](female_img, s_ref)
 
+        z1 = torch.randn((1, 16)).to(self.device)
+        z2 = torch.randn((1, 16)).to(self.device)
+        s1 = self.model["map"](z1, [0])
+        s2 = self.model["map"](z2, [0])
+        s3 = self.model["map"](z1, [1])
+
+        fake_female = self.model["gen"](male_img, s1)
+        fake_female2 = self.model["gen"](male_img, s2)
+        fake_male = self.model["gen"](male_img, s3)
+
+        # print(
+        #     torch.abs(s1 - s2).mean().item(),
+        #     torch.abs(s2 - s3).mean().item(),
+        #     torch.abs(s1 - s3).mean().item(),
+        # )
+        # print(
+        #     torch.abs(fake_female - fake_female2).mean().item(),
+        #     torch.abs(fake_female - fake_male).mean().item(),
+        #     torch.abs(fake_female2 - fake_male).mean().item(),
+        # )
+
         self.logger.add_image("male_to_female", fake)
         self.logger.add_image("src_male", male_img)
         self.logger.add_image("ref_female", female_img)
+        self.logger.add_image("male_to_female_z1", fake_female)
+        self.logger.add_image("male_to_female_z2", fake_female2)
+        self.logger.add_image("male_to_male_z1", fake_male)
 
     def log_scalars(
         self,

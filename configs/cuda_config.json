@@ -13,11 +13,12 @@
         "random_target": true
     },
     "data": {
-        "size": 32,
+        "size": 64,
         "domains": [
             "Male"
         ],
         "limit": 30000,
-        "val_size": 128
+        "val_size": 128,
+        "checkpoint": "checkpoints/"
     }
 }
