@@ -131,14 +131,14 @@ class Trainer:
             fake = self.model["gen"](real, s)
 
         d_fake = self.model["disc"](fake, y_trg)
+        # with torch.no_grad():
+        #     d_fake2 = self.model["disc"](real, (1 - y_src).long())
+        # print(torch.mean(d_real - d_fake2).item())
+
         r_loss = self.r1(d_real, real)
 
-        real_loss = F.binary_cross_entropy_with_logits(
-            d_real, torch.ones_like(y_trg) - 0.1
-        )
-        fake_loss = F.binary_cross_entropy_with_logits(
-            d_fake, torch.zeros_like(y_trg) + 0.1
-        )
+        real_loss = adversarial_loss(d_real, 1)
+        fake_loss = adversarial_loss(d_fake, 0)
 
         # print("-" * 10)
         # d_0 = d_fake[y_trg == 0].tolist() + d_real[y_src == 0].tolist()
@@ -178,7 +178,9 @@ class Trainer:
         real = real.requires_grad_()
 
         real_ref = batch_ref[0].to(self.device)
+        real_ref2 = real_ref.flip((0,))
         y_ref = batch_ref[1]["attributes"].to(self.device)
+        y_ref2 = y_ref.flip((0,))
 
         real_ref = real_ref.requires_grad_()
 
@@ -190,13 +192,19 @@ class Trainer:
         cycle_loss_g = cycle_loss(real_ref, fake_reversed)
         style_loss_g = style_rec_loss(s_ref, self.model["se"](fake, y_ref))
 
+        s_ref2 = s_ref = self.model["se"](real_ref2, y_ref2)
+        s_div_loss = style_div_loss(fake, self.model["gen"](real, s_ref2))
+
         d_fake = self.model["disc"](fake.detach(), y_ref)
         d_real = self.model["disc"](real_ref, y_ref)
         r_loss = self.r1(d_real, real_ref)
         adv_loss_d = adversarial_loss(d_fake, 0) + adversarial_loss(d_real, 1) + r_loss
 
         return (
-            adv_loss_g + cycle_loss_g + style_loss_g,
+            adv_loss_g,
+            cycle_loss_g,
+            style_loss_g,
+            s_div_loss,
             adv_loss_d,
         )
 
@@ -296,7 +304,7 @@ class Trainer:
                 ) = self.generator_step(real, y_src, y_trg)
 
                 loss_g = (
-                    adv_fake_g + style_rec_l + cycle_l - style_div_l * (0.9999**step)
+                    adv_fake_g + style_rec_l + cycle_l - style_div_l * (0.9997**step)
                 )
                 loss_g.backward()
                 self.optimizer_g.step()
@@ -306,7 +314,21 @@ class Trainer:
                 # -------------------------
                 # ------ GENERATOR REF ----
 
-                loss_g_ref, loss_d_ref = self.rec_step(real, y_src, batch_ref)
+                (
+                    adv_loss_g_ref,
+                    cycle_loss_g_ref,
+                    style_loss_g_ref,
+                    style_div_loss_ref,
+                    adv_loss_d_ref,
+                ) = self.rec_step(real, y_src, batch_ref)
+
+                loss_g_ref = (
+                    adv_loss_g_ref
+                    + cycle_loss_g_ref
+                    + style_loss_g_ref
+                    - style_div_loss_ref * (0.9997**step)
+                )
+                loss_d_ref = adv_loss_d_ref
 
                 self.optimizer_g.zero_grad()
                 self.optimizer_d.zero_grad()
@@ -346,6 +368,10 @@ class Trainer:
                         style_div_l.item(),
                         style_rec_l.item(),
                         gnorms,
+                        adv_loss_g_ref.item(),
+                        cycle_loss_g_ref.item(),
+                        style_loss_g_ref.item(),
+                        style_div_loss_ref.item(),
                     )
                     self.log_images(fake, fake_rec, real)
                     self.generate_samples_from_reference()
@@ -423,6 +449,10 @@ class Trainer:
         style_div_l,
         style_rec_l,
         gnorms,
+        adv_loss_g_ref,
+        cycle_loss_g_ref,
+        style_loss_g_ref,
+        style_div_loss_ref,
     ):
         self.logger.add_scalar("step", step)
         self.logger.add_scalar("epoch", epoch)
@@ -436,6 +466,10 @@ class Trainer:
         self.logger.add_scalar("loss_cycle", cycle_l)
         self.logger.add_scalar("loss_style_div", style_div_l)
         self.logger.add_scalar("loss_style_rex", style_rec_l)
+        self.logger.add_scalar("adv_loss_g_ref", adv_loss_g_ref)
+        self.logger.add_scalar("cycle_loss_g_ref", cycle_loss_g_ref)
+        self.logger.add_scalar("style_loss_g_ref", style_loss_g_ref)
+        self.logger.add_scalar("style_div_loss_ref", style_div_loss_ref)
         for grad_norm, label in zip(gnorms, ["G_gn", "D_gn", "M_gn", "SE_gn"]):
             self.logger.add_scalar(label, grad_norm)
 

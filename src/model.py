@@ -15,19 +15,19 @@ class Generator(nn.Module):
     def __init__(self, size, D):
         super().__init__()
         self.in_conv = nn.Conv2d(
-            in_channels=3, out_channels=size // 4, kernel_size=1, padding=0
+            in_channels=3, out_channels=size // 2, kernel_size=1, padding=0
         )
         self.out_conv = nn.Conv2d(size // 2, 3, 1, padding=0)
         self.downsampling = nn.Sequential(
             # 64x64
             nn.AvgPool2d(2),
-            ResBlock(size // 4, size // 2, nn.InstanceNorm2d(size // 4)),
+            ResBlock(size // 2, size, nn.InstanceNorm2d(size // 4)),
             # 32x32
             nn.AvgPool2d(2),
-            ResBlock(size // 2, size, nn.InstanceNorm2d(size // 2)),
+            ResBlock(size, size * 2, nn.InstanceNorm2d(size // 2)),
             # 16x16
             nn.AvgPool2d(2),
-            ResBlock(size, size * 2, nn.InstanceNorm2d(size)),
+            ResBlock(size * 2, size * 2, nn.InstanceNorm2d(size)),
             # # 8x8
         )
         self.intermediate = nn.Sequential(
@@ -104,18 +104,18 @@ class MappingNetwork(nn.Module):
     def __init__(self, K, D):
         super().__init__()
         self.backbone = nn.Sequential(
-            self.get_fc_block(16, 128),
-            self.get_fc_block(128, 128),
-            self.get_fc_block(128, 128),
-            self.get_fc_block(128, 128),
+            self.get_fc_block(16, 256),
+            self.get_fc_block(256, 256),
+            self.get_fc_block(256, 256),
+            self.get_fc_block(256, 256),
         )
         self.heads = nn.ModuleList(
             [
                 nn.Sequential(
-                    self.get_fc_block(128, 128),
-                    self.get_fc_block(128, 128),
-                    self.get_fc_block(128, 128),
-                    self.get_fc_block(128, D, activation=False),
+                    self.get_fc_block(256, 256),
+                    self.get_fc_block(256, 256),
+                    self.get_fc_block(256, 256),
+                    self.get_fc_block(256, D, activation=False),
                 )
                 for j in range(K)
             ]
