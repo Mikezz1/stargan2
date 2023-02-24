@@ -34,6 +34,13 @@ def parse_args():
         help="config name",
     )
 
+    parser.add_argument(
+        "-d",
+        default=64,
+        type=int,
+        help="D param",
+    )
+
     args = parser.parse_args()
     return args
 
@@ -45,6 +52,9 @@ if __name__ == "__main__":
 
     with open(f"configs/{args.config}.json") as f:
         config = json.load(f)
+
+    if args.d != 64:
+        config["model"]["D"] = args.d
 
     transform = transforms.Compose(
         [

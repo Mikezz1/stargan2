@@ -1,7 +1,7 @@
 {
     "wandb_project": "stargan2",
     "model": {
-        "D": 16
+        "D": 64
     },
     "training": {
         "batch_size": 64,
