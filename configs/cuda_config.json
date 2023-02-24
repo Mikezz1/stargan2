@@ -1,10 +1,10 @@
 {
     "wandb_project": "stargan2",
     "model": {
-        "D": 64
+        "D": 16
     },
     "training": {
-        "batch_size": 16,
+        "batch_size": 64,
         "epochs": 100,
         "device": "cuda",
         "lr": 1e-4,
@@ -13,7 +13,7 @@
         "random_target": true
     },
     "data": {
-        "size": 64,
+        "size": 32,
         "domains": [
             "Male"
         ],

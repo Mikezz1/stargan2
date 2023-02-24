@@ -67,6 +67,9 @@ class Trainer:
         # self.logger.add_text("arch_g", self.model["gen"].__repr__())
         # self.logger.add_text("arch_se", self.model["se"].__repr__())
 
+        # for _, model in self.model.items():
+        #     model.apply(self.init_weights)
+
         scheduler_g = None
         scheduler_d = None
 
@@ -140,44 +143,30 @@ class Trainer:
         real_loss = adversarial_loss(d_real, 1)
         fake_loss = adversarial_loss(d_fake, 0)
 
-        # print("-" * 10)
-        # d_0 = d_fake[y_trg == 0].tolist() + d_real[y_src == 0].tolist()
-        # d_1 = d_fake[y_trg == 1].tolist() + d_real[y_src == 1].tolist()
-        # l_0 = [0] * len(d_fake[y_trg == 0]) + [1] * len(d_real[y_src == 0])
-        # l_1 = [0] * len(d_fake[y_trg == 1]) + [1] * len(d_real[y_src == 1])
-
-        # print(
-        #     roc_auc_score(l_0, d_0),
-        #     roc_auc_score(l_1, d_1),
-        # )
-
         return (
             real_loss + fake_loss,
             r_loss,
-        )  # adversarial_loss(d_real, 1), adversarial_loss(d_fake, 0), r_loss
+        )
 
-    def checkpoint(self):
+    def checkpoint(self, epoch):
+        path = self.cfg["data"]["checkpoint"]
+        os.makedirs(f"{path}epoch_{epoch}", exist_ok=True)
+        path = path + f"epoch_{epoch}"
         for name, model in self.model.items():
-            torch.save(
-                model.state_dict(), self.cfg["data"]["checkpoint"] + f"{name}.pth"
-            )
-        torch.save(
-            self.optimizer_g.state_dict(), self.cfg["data"]["checkpoint"] + "opt_g.pth"
-        )
-        torch.save(
-            self.optimizer_d.state_dict(), self.cfg["data"]["checkpoint"] + "opt_d.pth"
-        )
-        torch.save(
-            self.optimizer_s.state_dict(), self.cfg["data"]["checkpoint"] + "opt_s.pth"
-        )
-        torch.save(
-            self.optimizer_m.state_dict(), self.cfg["data"]["checkpoint"] + "opt_m.pth"
-        )
+            torch.save(model.state_dict(), path + f"/{name}.pth")
+        torch.save(self.optimizer_g.state_dict(), path + "/opt_g.pth")
+        torch.save(self.optimizer_d.state_dict(), path + "/opt_d.pth")
+        torch.save(self.optimizer_s.state_dict(), path + "/opt_s.pth")
+        torch.save(self.optimizer_m.state_dict(), path + "/opt_m.pth")
 
     def rec_step(self, real, y_src, batch_ref):
         real = real.requires_grad_()
 
         real_ref = batch_ref[0].to(self.device)
+
+        # assert torch.sum(torch.abs(real_ref[0] - real[0])) > 0
+        # print(torch.sum(torch.abs(real_ref[0] - real[0])))
+
         real_ref2 = real_ref.flip((0,))
         y_ref = batch_ref[1]["attributes"].to(self.device)
         y_ref2 = y_ref.flip((0,))
@@ -193,8 +182,9 @@ class Trainer:
         style_loss_g = style_rec_loss(s_ref, self.model["se"](fake, y_ref))
 
         s_ref2 = s_ref = self.model["se"](real_ref2, y_ref2)
-        s_div_loss = style_div_loss(fake, self.model["gen"](real, s_ref2))
+        s_div_loss = style_div_loss(fake, self.model["gen"](real, s_ref2).detach())
 
+        fake = self.model["gen"](real, s_ref)
         d_fake = self.model["disc"](fake.detach(), y_ref)
         d_real = self.model["disc"](real_ref, y_ref)
         r_loss = self.r1(d_real, real_ref)
@@ -286,8 +276,8 @@ class Trainer:
 
                 # -----------------------
                 # ------ DISCRIMINATOR --
-                loss_d, r_loss = self.discriminator_step(real, y_src, y_trg)
-                loss_d = loss_d + r_loss
+                loss_disc, r_loss = self.discriminator_step(real, y_src, y_trg)
+                loss_d = loss_disc + r_loss
                 loss_d.backward()
                 self.optimizer_d.step()
 
@@ -304,7 +294,7 @@ class Trainer:
                 ) = self.generator_step(real, y_src, y_trg)
 
                 loss_g = (
-                    adv_fake_g + style_rec_l + cycle_l - style_div_l * (0.9997**step)
+                    adv_fake_g + style_rec_l + cycle_l  # - style_div_l * (0.9997**step)
                 )
                 loss_g.backward()
                 self.optimizer_g.step()
@@ -376,7 +366,7 @@ class Trainer:
                     self.log_images(fake, fake_rec, real)
                     self.generate_samples_from_reference()
                     # self.test_dls()
-            self.checkpoint()
+            self.checkpoint(epoch)
 
     # def test_dls(self):
     #     refs = next(iter(self.val_dataloader))
@@ -415,17 +405,6 @@ class Trainer:
             fake_female = self.model["gen"](male_img, s1)
             fake_female2 = self.model["gen"](male_img, s2)
             fake_male = self.model["gen"](male_img, s3)
-
-        # print(
-        #     torch.abs(s1 - s2).mean().item(),
-        #     torch.abs(s2 - s3).mean().item(),
-        #     torch.abs(s1 - s3).mean().item(),
-        # )
-        # print(
-        #     torch.abs(fake_female - fake_female2).mean().item(),
-        #     torch.abs(fake_female - fake_male).mean().item(),
-        #     torch.abs(fake_female2 - fake_male).mean().item(),
-        # )
 
         self.logger.add_image("male_to_female", fake)
         self.logger.add_image("src_male", male_img)

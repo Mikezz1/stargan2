@@ -1,7 +1,7 @@
 {
     "wandb_project": "stargan2",
     "model": {
-        "D": 64
+        "D": 16
     },
     "training": {
         "batch_size": 4,
@@ -13,7 +13,7 @@
         "random_target": true
     },
     "data": {
-        "size": 64,
+        "size": 32,
         "domains": [
             "Male"
         ],
