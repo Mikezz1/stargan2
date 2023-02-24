@@ -310,12 +310,12 @@ class Trainer:
                 ) = [torch.Tensor([0]) for _ in range(5)]
                 # ) = self.rec_step(real, y_src, batch_ref)
 
-                # loss_g_ref = (
-                #     adv_loss_g_ref
-                #     + cycle_loss_g_ref
-                #     + style_loss_g_ref
-                #     - style_div_loss_ref * (0.9997**step)
-                # )
+                loss_g_ref = (
+                    adv_loss_g_ref
+                    + cycle_loss_g_ref
+                    + style_loss_g_ref
+                    - style_div_loss_ref * (0.9997**step)
+                )
                 loss_d_ref = adv_loss_d_ref
 
                 # self.optimizer_g.zero_grad()
