@@ -9,12 +9,9 @@ import os
 from lpips_pytorch import LPIPS
 from sklearn.metrics import roc_auc_score
 
-# from torchmetrics.image.fid import FrechetInceptionDistance
-
 
 class Trainer:
     def __init__(self, dataloader, val_dataloader, reference_dataloader, config, log):
-        # self.config = config
         self.cfg = config
         self.device = self.cfg["training"]["device"]
         self.model = dict()
@@ -32,12 +29,6 @@ class Trainer:
         )
 
         self.r1 = R1(w=1)
-
-        # for _, model in self.model.items():
-        #     model.apply(self.init_weights)
-
-        # for _, model in self.avg_model.items():
-        #     model.apply(self.init_weights)
 
         self.avg_model["se"] = copy.deepcopy(self.model["se"]).to(self.device)
         self.avg_model["map"] = copy.deepcopy(self.model["map"]).to(self.device)
@@ -65,57 +56,6 @@ class Trainer:
 
         scheduler_g = None
         scheduler_d = None
-
-    def init_weights(self, weight):
-        if isinstance(weight, nn.Conv2d):
-            nn.init.kaiming_normal_(weight.weight, mode="fan_in", nonlinearity="relu")
-            if weight.bias is not None:
-                nn.init.constant_(weight.bias, 0)
-        if isinstance(weight, nn.Linear):
-            nn.init.kaiming_normal_(weight.weight, mode="fan_in", nonlinearity="relu")
-            if weight.bias is not None:
-                nn.init.constant_(weight.bias, 0)
-
-    def eval(self):
-
-        # criterion = LPIPS(net_type="alex", version="0.1")
-        # criterion = criterion.to(self.device)
-        # # fid = FrechetInceptionDistance(feature=64)
-        # n_examples = 10
-
-        # with torch.no_grad():
-        #     lpipses = []
-        #     for batch in self.val_dataloader:
-        #         real = batch[0].to(self.device)
-        #         y_src = batch[1]["attributes"].to(self.device)
-        #         y_trg = (
-        #             torch.ones(size=(self.cfg["training"]["batch_size"] * 2, 1))
-        #             .squeeze()
-        #             .to(self.device)
-        #             - y_src
-        #         ).long()
-
-        #         zs_trg = torch.randn(
-        #             (n_examples, self.cfg["training"]["batch_size"] * 2, 16)
-        #         ).to(
-        #             self.device
-        #         )  # num_samples x batch x  size
-
-        #         # нужно в стайл энкодер подавать что-то с первой размерностью в виде батчсайза
-
-        #         styles = [self.avg_model["map"](z, y_trg) for z in zs_trg]
-        #         fakes = torch.stack([self.avg_model["gen"](real, s) for s in styles])
-        #         # self.avg_model["gen"](real, s) (B, 3,H,W)
-        #         fakes = fakes.permute(1, 0, 2, 3, 4)
-        #         # self.avg_model["gen"](real, s) (B, 3,H,W, 10)
-        #         for reference_set in fakes:
-        #             for i, im1 in enumerate(reference_set):
-        #                 for j, im2 in enumerate(reference_set):
-        #                     if i > j:
-        #                         lpipses.append(criterion(im1, im2))
-        #     metric = torch.mean(torch.stack(lpipses))
-
-        self.logger.add_scalar("lpips_val_latent", 0)
 
     def discriminator_step(self, real, y_src, y_trg):
         real = real.requires_grad_()
@@ -153,9 +93,6 @@ class Trainer:
         real = real.requires_grad_()
 
         real_ref = batch_ref[0].to(self.device)
-
-        # assert torch.sum(torch.abs(real_ref[0] - real[0])) > 0
-        # print(torch.sum(torch.abs(real_ref[0] - real[0])))
 
         real_ref2 = real_ref.flip((0,))
         y_ref = batch_ref[1]["attributes"].to(self.device)
@@ -272,7 +209,7 @@ class Trainer:
                 self.optimizer_d.step()
 
                 # --------------------------
-                # ------ GENERATOR Latent --
+                # ------ GENERATOR ---------
 
                 (
                     adv_fake_g,
@@ -284,7 +221,7 @@ class Trainer:
                 ) = self.generator_step(real, y_src, y_trg)
 
                 loss_g = (
-                    adv_fake_g + style_rec_l + cycle_l  # - style_div_l * (0.9997**step)
+                    adv_fake_g + style_rec_l + cycle_l - style_div_l * (0.9997**step)
                 )
                 loss_g.backward()
                 self.optimizer_g.step()
@@ -292,7 +229,7 @@ class Trainer:
                 self.optimizer_m.step()
 
                 # -------------------------
-                # ------ GENERATOR REF ----
+                # ------ REFERENCE STEP ---
 
                 (
                     adv_loss_g_ref,
@@ -300,31 +237,24 @@ class Trainer:
                     style_loss_g_ref,
                     style_div_loss_ref,
                     adv_loss_d_ref,
-                ) = [torch.Tensor([0]) for _ in range(5)]
+                ) = self.rec_step(real, y_src, batch_ref)
 
                 loss_g_ref = (
                     adv_loss_g_ref
                     + cycle_loss_g_ref
                     + style_loss_g_ref
-                    - style_div_loss_ref * (0.9997**step)
+                    # - style_div_loss_ref * (0.9997**step)
                 )
                 loss_d_ref = adv_loss_d_ref
 
-                # self.optimizer_g.zero_grad()
-                # self.optimizer_d.zero_grad()
+                self.optimizer_g.zero_grad()
+                self.optimizer_d.zero_grad()
 
-                # loss_g_ref.backward()
-                # loss_d_ref.backward()
+                loss_g_ref.backward()
+                loss_d_ref.backward()
 
-                # self.optimizer_g.step()
-                # self.optimizer_d.step()
-
-                # Exponential moving average for validation
-                # self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
-                # self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)
-                # self.ema_weight_averaging(
-                #     self.model["gen"], self.avg_model["gen"], 0.999
-                # )
+                self.optimizer_g.step()
+                self.optimizer_d.step()
 
                 if (self.log) and (step % self.cfg["training"]["log_steps"] == 0):
                     self.eval()
@@ -337,9 +267,7 @@ class Trainer:
                     self.log_scalars(
                         step,
                         epoch,
-                        # adv_fake_d.item(),
                         adv_fake_g.item(),
-                        # adv_real_d.item(),
                         loss_g.item(),
                         loss_g_ref.item(),
                         loss_d.item(),
@@ -355,32 +283,16 @@ class Trainer:
                     )
                     self.log_images(fake, fake_rec, real)
                     self.generate_samples_from_reference()
-                    # self.test_dls()
             self.checkpoint(epoch)
-
-    # def test_dls(self):
-    #     refs = next(iter(self.val_dataloader))
-
-    #     imgs = refs[0].to(self.device)
-    #     y = refs[1]["attributes"].to(self.device)
-    #     male_y = y[y == 1]
-    #     male_img = imgs[y == 1]
-    #     female_y = y[y == 0]
-    #     female_img = imgs[y == 0]
-    #     self.logger.add_image("images_label_0", female_img)
-    #     self.logger.add_image("images_label_1", male_img)
-    #     self.logger.add_image("all_images_label_1", imgs)
-    #     self.logger.add_text("all_labels", f"{y}")
 
     def generate_samples_from_reference(self):
         with torch.no_grad():
-
             refs = next(iter(self.val_dataloader))
+
             imgs = refs[0].to(self.device)
             y = refs[1]["attributes"].to(self.device)
-            # male_y = y[y == 1][0]
+
             male_img = imgs[y == 1][0].unsqueeze(0)
-            # female_y = y[y == 0][0]
             female_img = imgs[y == 0][0].unsqueeze(0)
 
             s_ref = self.model["se"](male_img, [1])
@@ -388,6 +300,7 @@ class Trainer:
 
             z1 = torch.randn((1, 16)).to(self.device)
             z2 = torch.randn((1, 16)).to(self.device)
+
             s1 = self.model["map"](z1, [0])
             s2 = self.model["map"](z2, [0])
             s3 = self.model["map"](z1, [1])
@@ -407,9 +320,7 @@ class Trainer:
         self,
         step,
         epoch,
-        # adv_fake_d,
         adv_fake_g,
-        # adv_real_d,
         loss_g,
         loss_g_ref,
         loss_d,
@@ -425,9 +336,7 @@ class Trainer:
     ):
         self.logger.add_scalar("step", step)
         self.logger.add_scalar("epoch", epoch)
-        # self.logger.add_scalar("adv_fake_d", adv_fake_d)
         self.logger.add_scalar("adv_fake_g", adv_fake_g)
-        # self.logger.add_scalar("adv_real_d", adv_real_d)
         self.logger.add_scalar("loss_g", loss_g)
         self.logger.add_scalar("loss_g_ref", loss_g_ref)
         self.logger.add_scalar("loss_d", loss_d)
@@ -449,9 +358,6 @@ class Trainer:
 
     @torch.no_grad()
     def get_grad_norm(self, model, norm_type=2):
-        """
-        Move to utils
-        """
         parameters = model.parameters()
         if isinstance(parameters, torch.Tensor):
             parameters = [parameters]

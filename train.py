@@ -17,10 +17,8 @@ def set_seed(seed: int = 42) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    # When running on the CuDNN backend, two further options must be set
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    # Set a fixed value for the hash seed
     os.environ["PYTHONHASHSEED"] = str(seed)
     print(f"Random seed set as {seed}")
 
@@ -77,9 +75,8 @@ if __name__ == "__main__":
         dataset, [len(dataset) - val_size, val_size]
     )
 
-    device = "cpu"
-    num_workers = 0 if device == "cuda" else 0
-    pin_memory = True if device == "cuda" else False
+    num_workers = 0
+    pin_memory = False
     train_dataloader = torch.utils.data.DataLoader(
         train_ds,
         batch_size=config["training"]["batch_size"],

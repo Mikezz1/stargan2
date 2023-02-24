@@ -19,16 +19,11 @@ class Generator(nn.Module):
         )
         self.out_conv = nn.Conv2d(size // 2, 3, 1, padding=0)
         self.downsampling = nn.Sequential(
-            # 64x64
             nn.AvgPool2d(2),
             ResBlock(size // 2, size, nn.InstanceNorm2d(size // 4)),
-            # 32x32
             nn.AvgPool2d(2),
             ResBlock(size, size * 2, nn.InstanceNorm2d(size // 2)),
-            # 16x16
-            # nn.AvgPool2d(2),
             ResBlock(size * 2, size * 2, nn.InstanceNorm2d(size)),
-            # # 8x8
         )
         self.intermediate = nn.Sequential(
             ResBlock(size * 2, size * 2, nn.InstanceNorm2d(size * 2)),
@@ -41,13 +36,9 @@ class Generator(nn.Module):
             [
                 nn.Upsample(scale_factor=2),
                 AdaINResBlock(size * 2, size, D),
-                # 16x16
                 nn.Upsample(scale_factor=2),
                 AdaINResBlock(size, size, D),
-                # 32x32
-                # nn.Upsample(scale_factor=2),
                 AdaINResBlock(size, size // 2, D),
-                # 64x64
             ]
         )
 
@@ -95,13 +86,12 @@ class Discriminator(nn.Module):
 
 
 class MappingNetwork(nn.Module):
-    """Generates style codes \mathcal{s} for every domain \mathcal{y}
-    given some latent code \mathcal{z}. Used during training for generating
-    images with random a) domain and b) style. Trained with generator via
-    adversarial objective and style diversificaton loss
-    """
-
     def __init__(self, K, D):
+        """Generates style codes \mathcal{s} for every domain \mathcal{y}
+        given some latent code \mathcal{z}. Used during training for generating
+        images with random a) domain and b) style. Trained with generator via
+        adversarial objective and style diversificaton loss
+        """
         super().__init__()
         self.backbone = nn.Sequential(
             self.get_fc_block(16, 128),
@@ -137,12 +127,11 @@ class MappingNetwork(nn.Module):
 
 
 class StyleEncoder(nn.Module):
-    """Maps picture to style code. Trained with style reconstruction loss,
-    hwich is L1 distance between fixed style_code and style encoder prediction
-    given generated image.
-    """
-
     def __init__(self, D, K, size):
+        """Maps picture to style code. Trained with style reconstruction loss,
+        which is L1 distance between fixed style_code and style encoder prediction
+        given generated image.
+        """
         super().__init__()
         self.in_conv = nn.Conv2d(3, size // 4, 3, padding=1)
         self.downsampling = nn.Sequential(
@@ -174,16 +163,6 @@ class StyleEncoder(nn.Module):
 
 
 class ResBlock(nn.Module):
-    """
-    Building block for Generator, Discriminator and Style Encoder.
-    Should specify either pooling or upsampling
-    Args:
-        norm (nn.Module): Instance norm or Adaptive Instance norm
-        act (nn.Module): Activation function
-        pre_resampler (nn.Module): ConvTranspoce or Upsample for upsampling blocks
-        post_resampler (nn.Module): pooling layer
-    """
-
     def __init__(
         self,
         in_channels,
@@ -191,6 +170,9 @@ class ResBlock(nn.Module):
         norm=DummyResampler(),
         act=nn.ReLU(),
     ):
+        """
+        Building block for Generator, Discriminator and Style Encoder.
+        """
         super().__init__()
         self.norm = norm
         self.act = act
@@ -218,15 +200,10 @@ class ResBlock(nn.Module):
 
 
 class AdaINResBlock(nn.Module):
-    """
-    Building block for Generator
-    Args:
-        norm (nn.Module): Instance norm or Adaptive Instance norm
-        act (nn.Module): Activation function
-        pre_resampler (nn.Module): ConvTranspoce or Upsample for upsampling blocks
-    """
-
     def __init__(self, in_channels, out_channels, D, act=nn.ReLU()):
+        """
+        Building block for Generator
+        """
         super().__init__()
         self.act = act
         self.style_dim = D
@@ -259,9 +236,8 @@ class AdaINResBlock(nn.Module):
 
 
 class AdaIN(nn.Module):
-    """Like in style gan"""
-
     def __init__(self, n_fmaps, style_dim):
+        """Like in style gan"""
         super().__init__()
         self.mu_projector = nn.Linear(style_dim, n_fmaps)
         self.sigma_projector = nn.Linear(style_dim, n_fmaps)
