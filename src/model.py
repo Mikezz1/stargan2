@@ -78,7 +78,7 @@ class Discriminator(nn.Module):
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 2, size * 2, 4, padding=0),
+            nn.Conv2d(size * 2, size * 2, 2, padding=0),
             nn.LeakyReLU(),
         )
         self.out = nn.ModuleList([nn.Linear(size * 2, 1) for _ in range(K)])
@@ -158,7 +158,7 @@ class StyleEncoder(nn.Module):
         )
         self.conv = nn.Sequential(
             nn.LeakyReLU(),
-            nn.Conv2d(size * 2, size * 2, 4, padding=0),
+            nn.Conv2d(size * 2, size * 2, 2, padding=0),
             nn.LeakyReLU(),
         )
         self.out = nn.ModuleList([nn.Linear(size * 2, D) for _ in range(K)])
