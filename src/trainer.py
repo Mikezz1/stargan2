@@ -134,9 +134,6 @@ class Trainer:
             fake = self.model["gen"](real, s)
 
         d_fake = self.model["disc"](fake, y_trg)
-        # with torch.no_grad():
-        #     d_fake2 = self.model["disc"](real, (1 - y_src).long())
-        # print(torch.mean(d_real - d_fake2).item())
 
         r_loss = self.r1(d_real, real)
 
@@ -294,7 +291,7 @@ class Trainer:
                 ) = self.generator_step(real, y_src, y_trg)
 
                 loss_g = (
-                    adv_fake_g + style_rec_l + cycle_l  # - style_div_l * (0.9997**step)
+                    adv_fake_g + style_rec_l + cycle_l - style_div_l * (0.9997**step)
                 )
                 loss_g.backward()
                 self.optimizer_g.step()
@@ -310,24 +307,25 @@ class Trainer:
                     style_loss_g_ref,
                     style_div_loss_ref,
                     adv_loss_d_ref,
-                ) = self.rec_step(real, y_src, batch_ref)
+                ) = [torch.Tensor([0]) for _ in range(5)]
+                # ) = self.rec_step(real, y_src, batch_ref)
 
-                loss_g_ref = (
-                    adv_loss_g_ref
-                    + cycle_loss_g_ref
-                    + style_loss_g_ref
-                    - style_div_loss_ref * (0.9997**step)
-                )
+                # loss_g_ref = (
+                #     adv_loss_g_ref
+                #     + cycle_loss_g_ref
+                #     + style_loss_g_ref
+                #     - style_div_loss_ref * (0.9997**step)
+                # )
                 loss_d_ref = adv_loss_d_ref
 
-                self.optimizer_g.zero_grad()
-                self.optimizer_d.zero_grad()
+                # self.optimizer_g.zero_grad()
+                # self.optimizer_d.zero_grad()
 
-                loss_g_ref.backward()
-                loss_d_ref.backward()
+                # loss_g_ref.backward()
+                # loss_d_ref.backward()
 
-                self.optimizer_g.step()
-                self.optimizer_d.step()
+                # self.optimizer_g.step()
+                # self.optimizer_d.step()
 
                 # Exponential moving average for validation
                 # self.ema_weight_averaging(self.model["se"], self.avg_model["se"], 0.999)

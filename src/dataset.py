@@ -71,29 +71,9 @@ class CelebADataset(Dataset):
                     values = re.split(" +", line)
                     filename = values[0]
                     self.filenames.append(filename)
-                    # delete contraint on num of annotations
-                    annotations = []
-                    # print(domain_indices)
-                    # for idx in domain_indices:
-                    #     annotations.append(int(values[idx]))
-                    # annotations = self._transform_targets(tuple(annotations), domains)
                     self.annotations.append(max(0, int(values[1 + domain_indices[0]])))
 
         self.annotations = np.array(self.annotations)
-
-    def _transform_targets(self, seq, domains):
-        from itertools import product
-
-        """Transforms sequence of form (-1,1,-1) to the form of (1,0,0,1,1,0)"""
-        new_seq = []
-        combs = list(product([-1, 1], repeat=len(domains)))
-        labels = {d: i for i, d in enumerate(combs)}
-        return labels[seq]
-
-        # for elem in seq:
-
-        #     new_seq.extend([0, 1]) if elem == 1 else new_seq.extend([1, 0])
-        return new_seq
 
     def __len__(self):
         return len(self.filenames)
